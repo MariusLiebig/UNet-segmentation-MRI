@@ -33,13 +33,8 @@ class BaseDataset(Dataset):
         img /= max_val if max_val > 0 else 1
         return img
     
-    def apply_augmentations(self, image, mask):
-        image = np.transpose(image, (1, 2, 0))  # (H, W, C)
-        mask = np.transpose(mask, (1, 2, 0)) 
-        if self.augmentation:
-            augmented = self.augmentation(image=image, mask=mask)
-            return augmented['image'], augmented['mask']
-        return image, mask
+
+        
     
 
 class MedImgDataset3D(BaseDataset):
@@ -49,16 +44,38 @@ class MedImgDataset3D(BaseDataset):
     def __getitem__(self, idx):
         img = self.load_nii(self.image_paths[idx])
         mask = self.load_nii(self.mask_paths[idx])
-        img = torch.tensor(img).float()
-        mask = torch.tensor(mask).float()
+        img, mask = np.expand_dims(img, axis=0), np.expand_dims(mask, axis=0)  # Add channel dimension
+ 
         img, mask = self.apply_augmentations(img, mask)
 
-        img = self.pad_volume(img)
-        print(f"Image shape: {img.shape}")
+        # Convert to tensors if not already
+        if not isinstance(img, torch.Tensor):
+            img = torch.tensor(img).float()
+        else:
+            img = img.clone().detach().float()
 
-        return torch.tensor(img).float(), torch.tensor(mask).float()
+        if not isinstance(mask, torch.Tensor):
+            mask = torch.tensor(mask).float()
+        else:
+            mask = mask.clone().detach().float()
 
+        return img, mask
 
+    def apply_augmentations(self, image, mask):
+        
+        if self.augmentation:
+            # Always transpose (C, H, W, D) → (H, W, D, C)
+            # sum_dims = tuple(list(range(1, image.ndim)) + [0])
+            # image = np.transpose(image, sum_dims)
+            # mask = np.transpose(mask, sum_dims)
+
+            data = {"image": image, "mask": mask}
+            augmented = self.augmentation(data)
+            
+            # After augmentation, return tensors
+            return augmented["image"], augmented["mask"]
+
+        return image, mask
 
 
 
@@ -123,6 +140,14 @@ class MedImgDataset2D(BaseDataset):
         slice_2d = np.take(volume, slice_idx, axis=self.slice_axis)
         slice_2d = np.expand_dims(slice_2d, axis=0)  # (C=1, H, W)
         return slice_2d
+
+    def apply_augmentations(self, image, mask):
+        image = np.transpose(image, (1, 2, 0))  # (H, W, C)
+        mask = np.transpose(mask, (1, 2, 0))
+        if self.augmentation:
+            augmented = self.augmentation(image=image, mask=mask)
+            return augmented['image'], augmented['mask']
+        return image, mask
 
 
 

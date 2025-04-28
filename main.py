@@ -1,129 +1,83 @@
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
+
 import torch
 import torch.nn as nn
 from torch import optim
 from torch.amp import GradScaler
 from PIL import Image
-
+from monai.transforms import (
+    Compose,
+    ResizeD,
+    NormalizeIntensity,
+    ScaleIntensityD,
+    ToTensorD,
+    Lambda
+)
+import argparse
 import os
 
-from config import base_path
+from config import base_path, CONFIG
 from utils import (
     data_loader2D,
     data_loader3D,
     load_paths,
     save_predictions_as_img,
-    mask_to_class
+    mask_to_class,
+    get_2d_augmentation,
+    get_3d_augmentation,
 )
 from train import Trainer
 from model import UNET, UNET3D
 from metric import DiceLoss, CombinedLoss
 
 
-def main():
-    learning_rate = 1e-4
-    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    batch_size = 8
-    num_epochs = 10
-    train_set_size = 0.8
-    image_height = 512
-    image_width = 512
+def run_training(model_class, data_loader_fn, augmentation_fn):
+    model = model_class(input_channels=CONFIG["input_channels"], output_channels=CONFIG["output_channels"],
+                     feature_size=CONFIG["feature_sizes"])
 
-    augmentation = A.Compose(
-        [
-            A.Resize(height=image_height, width=image_width),
-            # A.Rotate(limit=35, p=1.0),
-            # A.HorizontalFlip(p=0.5),
-            # A.VerticalFlip(p=0.1),
-            A.Normalize(
-                mean=[ 0.0],
-                std=[1.0],
-                max_pixel_value=255.0,
-            ),
-            A.Lambda(mask=mask_to_class),  
-            ToTensorV2(),
-        ])
-
-    img_paths, mask_paths = load_paths()
-    img_paths, mask_paths = img_paths[0:50], mask_paths[0:50]
-
-    model = UNET(input_channels=1, output_channels=3).to(DEVICE)
-    loss_fn = nn.BCEWithLogitsLoss()
-    weights = torch.tensor([0.1, 1.0, 1.0], device='cuda') #For class imbalance
-    loss_fn =  CombinedLoss(num_classes=3)
-    # loss_fn = nn.CrossEntropyLoss(weight=weights)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
-    print("-"*20,"Loading Data", "-" * 20)
-    train_loader, val_loader = data_loader2D(
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs!")
+        model = nn.DataParallel(model)
+
+    print(f"mumber of GPUs: {torch.cuda.device_count()}")
+    model = model.to(CONFIG["device"])
+
+    augmentation = augmentation_fn()
+
+    print("-" * 20, "Loading Data", "-" * 20)
+    train_loader, val_loader = data_loader_fn(
         img_paths,
         mask_paths,
-        augmentation = augmentation,
-        batch_size = batch_size,
-        train_set_size = train_set_size,
-        )
+        augmentation=augmentation,
+        batch_size=CONFIG["batch_size"],
+        train_set_size=CONFIG["train_set_size"]
+    )
 
-    # Load model?????
-    # if LOAD_MODEL:
-    #     load_checkpoint(torch.load("my_checkpoint.pth.tar"), model)
+    print("-" * 20, "Training Data", "-" * 20)
 
-
-    # check_accuracy(val_loader, model, device=DEVICE)
+    loss_fn = CombinedLoss(num_classes=3)
+    optimizer = optim.Adam(model.parameters(), lr=CONFIG["learning_rate"])
     scaler = GradScaler()
 
-    print("-"*20,"Training Data", "-" * 20)
-
-    trainer = Trainer(batch_size, learning_rate, num_epochs, model, (train_loader, val_loader), loss_fn, optimizer, scaler)
+    trainer = Trainer(CONFIG["batch_size"], CONFIG["learning_rate"], CONFIG["num_epochs"],
+                      model, (train_loader, val_loader), loss_fn, optimizer, scaler)
     trainer.train()
-
-#Plots and accuracy
-
-def test():
-    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    batch_size = 8
-    train_set_size = 0.8
-
-
-    augmentation = A.Compose(
-        [
-            # A.Resize(height=image_height, width=image_width),
-            # A.Rotate(limit=35, p=1.0),
-            # A.HorizontalFlip(p=0.5),
-            # A.VerticalFlip(p=0.1),
-            # A.Normalize(
-            #     mean=[0.0],
-            #     std=[1.0],
-            #     max_pixel_value=255.0,
-            # ),
-            A.Lambda(mask=mask_to_class),  
-            ToTensorV2(),
-        ])
-    
-
-    img_paths, mask_paths = load_paths()
-    img_paths, mask_paths = img_paths[0:10], mask_paths[0:10]
-
-    model = UNET(input_channels=1, output_channels=3).to(DEVICE)
-    
-    print("-"*20,"Loading Data", "-" * 20)
-    train_loader, val_loader = data_loader2D(
-        img_paths,
-        mask_paths,
-        augmentation = augmentation,
-        batch_size = batch_size,
-        train_set_size = train_set_size,
-        )
-    print("-"*20,"Testing Data", "-" * 20)
-    save_predictions_as_img(
-        val_loader,
-        model,
-        folder="saved_images_test2/",
-        device=DEVICE,
-        max_examples=40,
-    )
 
 
 
 if __name__ == '__main__':
-    main()
+    #Can start 2D or 3D training from terminal
+    #python main.py --d2 for 2D training
+    #python main.py for 3D training
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--d2', action='store_true', help='Use 2D segmentation instead of 3D')
+    args = parser.parse_args()
+
+    img_paths, mask_paths = load_paths()
+    # img_paths, mask_paths = img_paths[0:5], mask_paths[0:5]
+
+    if args.d2:
+        run_training(UNET, data_loader2D, get_2d_augmentation)
+    else:
+        run_training(UNET3D, data_loader3D, get_3d_augmentation)
+

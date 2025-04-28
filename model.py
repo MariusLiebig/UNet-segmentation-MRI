@@ -6,11 +6,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class UNETBase(nn.Module):
-    def __init__(self, input_channels, output_channels, output_feature_sizes, conv, batchnorm, pool, convtranspose):
+    def __init__(self, input_channels, output_channels, feature_size, conv, batchnorm, pool, convtranspose):
         super().__init__()
         self.output_channels = output_channels
         self.input_channels = input_channels
-        self.output_feature_sizes = output_feature_sizes
+        self.feature_size = feature_size
         self.conv = conv
         self.batchnorm = batchnorm
         self.pool = pool
@@ -20,16 +20,16 @@ class UNETBase(nn.Module):
         self.decoder = nn.ModuleList()
 
         in_channels = input_channels
-        for feature in output_feature_sizes:
+        for feature in feature_size:
             self.encoder.append(self.double_conv(in_channels, feature))
             in_channels = feature
 
-        for feature in reversed(output_feature_sizes):
+        for feature in reversed(feature_size):
             self.decoder.append(convtranspose(feature * 2, feature, kernel_size=2, stride=2))
             self.decoder.append(self.double_conv(feature * 2, feature))
 
-        self.lowest_layer = self.double_conv(output_feature_sizes[-1], output_feature_sizes[-1] * 2)
-        self.final_conv = self.conv(output_feature_sizes[0], output_channels, kernel_size=1)
+        self.lowest_layer = self.double_conv(feature_size[-1], feature_size[-1] * 2)
+        self.final_conv = self.conv(feature_size[0], output_channels, kernel_size=1)
 
     def double_conv(self, in_channels, out_channels):
         return nn.Sequential(
@@ -43,11 +43,11 @@ class UNETBase(nn.Module):
 
 
 class UNET(UNETBase):
-    def __init__(self, input_channels=1, output_channels=3, output_feature_sizes=[32, 64, 128, 256, 512]):
+    def __init__(self, input_channels=1, output_channels=3, feature_size=[32, 64, 128, 256, 512]):
         super().__init__(
             input_channels=input_channels,
             output_channels=output_channels,
-            output_feature_sizes=output_feature_sizes,
+            feature_size=feature_size,
             conv=nn.Conv2d,
             batchnorm=nn.BatchNorm2d,
             pool=nn.MaxPool2d,
@@ -75,11 +75,11 @@ class UNET(UNETBase):
 
 
 class UNET3D(UNETBase):
-    def __init__(self, input_channels=1, output_channels=1, output_feature_sizes=[64, 128, 256, 512]):
+    def __init__(self, input_channels=1, output_channels=3, feature_size=[64, 128, 256, 512]):
         super().__init__(
             input_channels=input_channels,
             output_channels=output_channels,
-            output_feature_sizes=output_feature_sizes,
+            feature_size=feature_size,
             conv=nn.Conv3d,
             batchnorm=nn.BatchNorm3d,
             pool=nn.MaxPool3d,
@@ -106,7 +106,7 @@ class UNET3D(UNETBase):
         return self.final_conv(x)
 
 if __name__ == "__main__":
-    model = UNET3D(input_channels=1, output_channels=1, output_feature_sizes=[64, 128, 256, 512])
+    model = UNET3D(input_channels=1, output_channels=1, feature_size=[64, 128, 256, 512])
     x = torch.randn((2, 1, 128, 128))  # Example input
     y = model(x)
     print("Input shape: ", x.shape)
