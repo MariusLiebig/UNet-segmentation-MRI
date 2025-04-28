@@ -117,13 +117,13 @@ def get_3d_augmentation():
     return Compose([
         # LoadImaged(keys=["image", "mask"]),
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-        CropForegroundd(keys=["image", "mask"], source_key="mask", margin=128  ),
+        CropForegroundd(keys=["image", "mask"], source_key="mask", margin=32  ),
 
     # 2. Random crops, but prefer tumor areas!
         RandCropByPosNegLabeld(
             keys=["image", "mask"],
             label_key="mask",
-            spatial_size=(128, 128, 32),
+            spatial_size=(64, 64, 32),
             pos=1.0,  # Always focus on foreground (tumor)
             neg=0.0,  # Never focus on background
             num_samples=1,  # Only 1 crop per image
@@ -131,9 +131,9 @@ def get_3d_augmentation():
         RandBiasFieldd(keys=["image"], prob=0.3),
         RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
         RandGaussianNoised(keys=["image"], prob=0.3),
-        RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
-        RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
-        RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
+        # RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
+        # RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
+        # RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
         RandZoomd(keys=["image", "mask"], min_zoom=0.9, max_zoom=1.1, prob=0.5),
         mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
 

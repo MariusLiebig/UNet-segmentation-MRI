@@ -74,6 +74,10 @@ class UNETBase(nn.Module):
         psi = torch.sigmoid(self.attention_psi[idx](f))
 
         up = self.attention_upsample[idx](psi)
+
+
+        if up.shape != skip.shape:
+            up = F.interpolate(up, size=skip.shape[2:], mode='trilinear', align_corners=True)
         out = up * skip
         return out
 

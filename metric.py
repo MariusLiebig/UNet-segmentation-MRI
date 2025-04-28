@@ -76,7 +76,7 @@ class DiceLoss(nn.Module):
         super(DiceLoss, self).__init__()
         self.num_classes = num_classes
         self.smooth = smooth
-        self.class_weights = torch.tensor([0.05, 0.475, 0.475], device='cuda')  # move to init
+        self.class_weights = torch.tensor([0.2, 0.4, 0.4], device='cuda')  # move to init
 
     def forward(self, logits, targets):
         if logits.ndim == 5 :
@@ -134,7 +134,7 @@ class CombinedLoss(nn.Module):
         super().__init__()
         self.dice = DiceLoss(num_classes)
         self.weights = torch.tensor([0.2, 0.4, 0.4], device='cuda')
-        self.alpha = torch.tensor([0.05, 0.475, 0.475], device='cuda')
+        self.alpha = torch.tensor([0.2, 0.4, 0.4], device='cuda')
 
         self.ce = FocalLoss(alpha=self.alpha, gamma=2, reduction="mean")
         # self.ce = nn.CrossEntropyLoss(weight=self.weights, reduction="mean")
