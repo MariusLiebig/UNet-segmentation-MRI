@@ -4,14 +4,35 @@ import os
 # import matplotlib.pyplot as plt
 from config import base_path
 import torch
-from data.loader import MedImgDataset2D, MedImgDataset3D
-from torch.utils.data import DataLoader, random_split
 import torchvision
 import glob
 from PIL import Image
 import numpy as np
 import torch.nn.functional as F
-
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import json
+import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader, random_split
+import monai.transforms as mt
+from monai.transforms import (
+    Compose,
+    LoadImaged,
+    Spacingd,
+    Orientationd,
+    ScaleIntensityRanged,
+    RandFlipd,
+    RandRotate90d,
+    RandShiftIntensityd,
+    RandBiasFieldd,
+    RandGaussianNoised,
+    RandSpatialCropd,
+    NormalizeIntensityd,
+    RandZoomd,
+    ToTensord,
+)
+from data.loader import MedImgDataset2D, MedImgDataset3D
+from config import CONFIG
 
 def to_cuda(tensor):
     if torch.cuda.is_available():
@@ -20,9 +41,21 @@ def to_cuda(tensor):
         return tensor.cuda()
     return tensor
 
-def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
+
+def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
+    print("=> Saving checkpoint")
+    torch.save(state, filename)
+
+def load_checkpoint(checkpoint, model):
+    print("=> Loading checkpoint")
+    model.load_state_dict(checkpoint["state_dict"])
+
+
+
+
+def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1):
     #Split into train and validation set via pathdir
-    full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, get_all_slices=True)
+    full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, get_all_slices=True, keep_background_fraction=CONFIG["keep_background_fraction"])
     print(f"Full dataset length: {len(full_dataset)}")
 
     train_size = int(train_set_size * len(full_dataset))
@@ -62,13 +95,45 @@ def load_paths():
     return image_paths, mask_paths
 
 
-def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
-    print("=> Saving checkpoint")
-    torch.save(state, filename)
+def mask_to_class(x, **kwargs):
+    x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
 
-def load_checkpoint(checkpoint, model):
-    print("=> Loading checkpoint")
-    model.load_state_dict(checkpoint["state_dict"])
+    return x_new
+
+
+
+def get_2d_augmentation():
+    return A.Compose([
+        A.Resize(height=CONFIG["image_height"], width=CONFIG["image_width"]),
+        A.Normalize(mean=[0.0], std=[1.0], max_pixel_value=255.0),
+        A.Lambda(mask=mask_to_class),
+        ToTensorV2()
+    ])
+
+def get_3d_augmentation():
+    # If you switch to proper TorchIO later
+    return Compose([
+        # LoadImaged(keys=["image", "mask"]),
+        NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+        RandBiasFieldd(keys=["image"], prob=0.3),
+        RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
+        RandGaussianNoised(keys=["image"], prob=0.3),
+        RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
+        RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
+        RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
+        RandRotate90d(keys=["image", "mask"], prob=0.5, max_k=3),
+        RandZoomd(keys=["image", "mask"], min_zoom=0.9, max_zoom=1.1, prob=0.5),
+        RandSpatialCropd(keys=["image", "mask"], roi_size=(128, 128, 64), random_center=True, random_size=False),
+        mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
+        mt.ResizeD(keys=["image", "mask"], spatial_size=(CONFIG["image_height"], CONFIG["image_width"], CONFIG["image_depth"])),
+
+        ToTensord(keys=["image", "mask"]),
+    ])
+
+
+
+
+
 
 
 
@@ -126,109 +191,6 @@ def save_predictions_as_img(
 
 
 
-def save_predictions_as_img_3d(
-    loader,
-    model,
-    folder="saved_images/",
-    device="cuda",
-    overlay: bool = False,
-    slice_axis: int = 2,  # Default: axial slices
-    save_every_nth_slice: int = 1,  # Save every slice, or every nth
-):
-    """
-    Save predictions and overlays for 3D volumes slice-by-slice.
-
-    Args:
-        loader: DataLoader yielding (images, masks), shape [B, C, D, H, W]
-        model: segmentation model
-        folder: directory to save image slices
-        device: "cuda" or "cpu"
-        overlay: if True, save blended overlay image
-        slice_axis: which axis to slice on (0=depth, 1=height, 2=width)
-        save_every_nth_slice: skip slices for brevity if desired
-    """
-    os.makedirs(folder, exist_ok=True)
-    model.eval()
-
-    with torch.no_grad():
-        for batch_idx, (imgs, masks) in enumerate(loader):
-            imgs = imgs.to(device)
-            preds = torch.sigmoid(model(imgs))
-            preds = (preds > 0.5).float().cpu().numpy()  # [B, 1, D, H, W]
-            imgs_np = imgs.cpu().numpy()
-            masks_np = masks.cpu().numpy()
-
-            for i in range(imgs_np.shape[0]):  # batch loop
-                idx = batch_idx * loader.batch_size + i
-                pred_vol = preds[i, 0]   # [D, H, W]
-                img_vol = imgs_np[i, 0]  # [D, H, W] or [C, D, H, W]
-                gt_vol = masks_np[i, 0]  # [D, H, W]
-
-                depth = pred_vol.shape[0]
-
-                for d in range(0, depth, save_every_nth_slice):
-                    pred_slice = (pred_vol[d] * 255).astype(np.uint8)
-                    gt_slice = (gt_vol[d] * 255).astype(np.uint8)
-                    img_slice = (img_vol[d] * 255).astype(np.uint8)
-
-                    Image.fromarray(pred_slice).save(f"{folder}/pred_{idx}_{d}.png")
-                    Image.fromarray(gt_slice).save(f"{folder}/gt_{idx}_{d}.png")
-
-                    if overlay:
-                        overlay_img = np.stack([img_slice] * 3, axis=-1)  # grayscale to RGB
-                        overlay_img[pred_slice > 0] = [255, 0, 0]  # red mask
-                        blended = (0.6 * overlay_img + 0.4 * np.stack([img_slice]*3, axis=-1)).astype(np.uint8)
-                        Image.fromarray(blended).save(f"{folder}/overlay_{idx}_{d}.png")
-
-    model.train()
-
-def mask_to_class(x, **kwargs):
-    x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
-
-    return x_new
-
-
-
-
-# def path_show_image(img_path, every_nth=5, img_only=True, channel_first=True, simp_keys=True):
-#     data = LoadImage(image_only = img_only, ensure_channel_first = channel_first, simple_keys = simp_keys)(os.path.join(base_path, img_path))
-#     print(f"image data shape: {data.shape}")
-#     print(f"meta data: {data.meta.keys()}")
-#     fig, _ = monai.visualize.matshow3d(monai.transforms.Orientation("SPL")(data), every_n = every_nth)
-#     plt.show()
-
-# def show_image(image, every_nth=5):
-#     fig, _ = monai.visualize.matshow3d(monai.transforms.Orientation("SPL")(image), every_n = every_nth)
-#     plt.show()
-
-
-
 
 if __name__ == '__main__':
-    img_paths, mask_paths = load_paths()
-    print(f"Image paths: {img_paths[0:5]}")
-    dataset = MedImgDataset3D(img_paths, mask_paths)
-
-    largest_height = 0
-    largest_width = 0
-    largest_breadth = 0
-    mask_largest_height = 0
-    mask_largest_width = 0
-    mask_largest_breadth = 0
-
-    for X, y in dataset:
-        largest_height = max(largest_height, X.shape[0])
-        largest_width = max(largest_width, X.shape[1])
-        largest_breadth = max(largest_breadth, X.shape[2])
-        mask_largest_height = max(mask_largest_height, y.shape[0])
-        mask_largest_width = max(mask_largest_width, y.shape[1])
-        mask_largest_breadth = max(mask_largest_breadth, y.shape[2])
-        print(f"  Image shape: {X.shape}")
-        print(f"  Mask shape: {y.shape}")
-        # show_image(X)
-    print(f"Largest height: {largest_height}")
-    print(f"Largest width: {largest_width}")
-    print(f"Largest breadth: {largest_breadth}")
-    print(f"Mask largest height: {mask_largest_height}")
-    print(f"Mask largest width: {mask_largest_width}")
-    print(f"Mask Largest breadth: {mask_largest_breadth}")
+   pass
