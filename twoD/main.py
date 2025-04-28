@@ -24,8 +24,8 @@ from metric import DiceLoss, CombinedLoss
 def main():
     learning_rate = 1e-4
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    batch_size = 8
-    num_epochs = 10
+    batch_size = 32
+    num_epochs = 20
     train_set_size = 0.8
     image_height = 512
     image_width = 512

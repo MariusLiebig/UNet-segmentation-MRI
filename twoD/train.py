@@ -105,8 +105,8 @@ class Trainer:
             print(f"Train loss: {avg_loss:.4f}")
             dice_coefficient(self.dataloader_val, self.model)
             save_predictions_as_img(self.dataloader_train, self.model, folder="saved_images/")
-            if epoch % 5 == 0:
-                self.save_checkpoint(epoch)
+            if (epoch + 1) % 5 == 0:
+                self.save_checkpoint(epoch + 1)
 
     #Putting in UTILS?
 
@@ -136,7 +136,7 @@ class Trainer:
             'validation_history': self.validation_history,
             'time': time.time() - self.start_time,
         }
-        torch.save(save_dict, f"checkpoints/checkpoint_epoch_{epoch}.pth")
+        torch.save(save_dict, f"checkpoints/checkpoint_epoch_{epoch}2D.pth")
         print(f"Checkpoint saved at epoch {epoch}.")
 
     def save_history(self, filename="train_history.json"):
