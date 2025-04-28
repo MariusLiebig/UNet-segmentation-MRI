@@ -30,6 +30,8 @@ from monai.transforms import (
     NormalizeIntensityd,
     RandZoomd,
     ToTensord,
+    CropForegroundd,
+    RandCropByPosNegLabeld,
 )
 from data.loader import MedImgDataset2D, MedImgDataset3D
 from config import CONFIG
@@ -115,17 +117,26 @@ def get_3d_augmentation():
     return Compose([
         # LoadImaged(keys=["image", "mask"]),
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+        CropForegroundd(keys=["image", "mask"], source_key="mask"),
+
+    # 2. Random crops, but prefer tumor areas!
+        RandCropByPosNegLabeld(
+            keys=["image", "mask"],
+            label_key="mask",
+            spatial_size=(512, 512, 60),
+            pos=0.9,   # 90% probability to crop tumor (foreground)
+            neg=0.1,   # 10% probability to crop background (healthy)
+            num_samples=4,  # 4 patches from each volume
+        ),
+
         RandBiasFieldd(keys=["image"], prob=0.3),
         RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
         RandGaussianNoised(keys=["image"], prob=0.3),
         RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
         RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
         RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
-        RandRotate90d(keys=["image", "mask"], prob=0.5, max_k=3),
         RandZoomd(keys=["image", "mask"], min_zoom=0.9, max_zoom=1.1, prob=0.5),
-        RandSpatialCropd(keys=["image", "mask"], roi_size=(128, 128, 64), random_center=True, random_size=False),
         mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
-        mt.ResizeD(keys=["image", "mask"], spatial_size=(CONFIG["image_height"], CONFIG["image_width"], CONFIG["image_depth"])),
 
         ToTensord(keys=["image", "mask"]),
     ])
