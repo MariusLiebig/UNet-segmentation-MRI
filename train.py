@@ -136,7 +136,8 @@ class Trainer:
 
             val_acc, val_loss = dice_coefficient(self.dataloader_val, self.model, num_classes=3)
             print(f"Validation accuracy: {val_acc:.4f}")
-            self.validation_history["loss"][self.global_step] = val_acc
+            self.validation_history["loss"][self.global_step] = val_loss
+            self.validation_history["accuracy"][self.global_step] = val_acc
 
             if (epoch + 1) % 5 == 0:
                 self.save_checkpoint(epoch + 1)
