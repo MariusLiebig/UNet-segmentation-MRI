@@ -73,7 +73,7 @@ class MedImgDataset3D(BaseDataset):
             augmented = self.augmentation(data)
             
             # After augmentation, return tensors
-            return augmented["image"], augmented["mask"]
+            return augmented[0]["image"], augmented[0]["mask"]
 
         return image, mask
 

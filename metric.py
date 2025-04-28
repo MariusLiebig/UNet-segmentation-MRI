@@ -118,7 +118,9 @@ class FocalLoss(nn.Module):
 
         ce_loss = F.cross_entropy(logits, targets, reduction="none")  # [B, H, W, D]
         pt = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+
+        alpha = self.alpha.view(1, -1, 1, 1, 1)  # shape (1, 3, 1, 1, 1)
+        focal_loss = alpha * (1 - pt) ** self.gamma * ce_loss
 
         if self.reduction == "mean":
             return focal_loss.mean()

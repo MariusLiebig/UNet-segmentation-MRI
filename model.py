@@ -31,6 +31,23 @@ class UNETBase(nn.Module):
         self.lowest_layer = self.double_conv(feature_size[-1], feature_size[-1] * 2)
         self.final_conv = self.conv(feature_size[0], output_channels, kernel_size=1)
 
+
+        # Attention layers
+        self.attention_theta = nn.ModuleList()
+        self.attention_phi = nn.ModuleList()
+        self.attention_psi = nn.ModuleList()
+        self.attention_upsample = nn.ModuleList()
+
+        for idx, feature in enumerate(reversed(feature_size)):
+            print("Feature size: ", feature)
+            print("Idx: ", idx)
+            self.attention_theta.append(conv(feature, feature, kernel_size=1, stride=2))
+            self.attention_phi.append(conv(feature *2, feature, kernel_size=1, stride=1))
+            self.attention_psi.append(conv(feature, 1, kernel_size=1, stride=1))
+            self.attention_upsample.append(convtranspose(1, 1, kernel_size=2, stride=2))
+
+
+
     def double_conv(self, in_channels, out_channels):
         return nn.Sequential(
             self.conv(in_channels, out_channels, kernel_size=3, padding=1),
@@ -40,34 +57,24 @@ class UNETBase(nn.Module):
             self.batchnorm(out_channels),
             nn.ReLU(inplace=True)
         )
-    def attention_block(self, skip, g):
+    def attention_block(self, skip, g, idx):
         """
         skip : skip connection (from encoder)
         g : gating signal (from decoder)
+        idx : which attention block (layer index)
         """
-        # Example: skip: (128, 128, 256) and g: (64, 64, 512)
-        print("skip shape: ", skip.shape)
-        print("g shape: ", g.shape)
 
-        # reduce shape of skip -> skip: (64, 64, 256)
-        theta_skip = self.conv(skip.size(1), skip.size(1), kernel_size=1, stride=2)(skip)
-        # reduce g channels -> g:(64, 64, 256)
-        phi_g = self.conv(g.size(1), g.size(1) // 2, kernel_size=1, stride=1)(g)
-        
-        print("theta_skip shape: ", theta_skip.shape)
-        print("phi_g shape: ", phi_g.shape)
-        # Sum
+        # Apply predefined conv layers
+        theta_skip = self.attention_theta[idx](skip)
+        phi_g = self.attention_phi[idx](g)
+
+        if phi_g.shape != theta_skip.shape:
+            phi_g = F.interpolate(phi_g, size=theta_skip.shape[2:], mode='trilinear', align_corners=True)
         f = torch.relu(theta_skip + phi_g)
+        psi = torch.sigmoid(self.attention_psi[idx](f))
 
-        # 1x1 conv to produce attention map of size (64, 64, 1)
-        psi = self.conv(f.size(1), 1, kernel_size=1, stride=1)(f)
-
-        # Attention map bewteen 0 and 1
-        psi = torch.sigmoid(psi)
-
-        # Upsample (128, 128, 256)
-        up = self.convtranspose(1, 1,  kernel_size = 2, stride = 2)(psi)
-        out = up*skip
+        up = self.attention_upsample[idx](psi)
+        out = up * skip
         return out
 
 
@@ -131,7 +138,7 @@ class UNET3D(UNETBase):
             if x_up.shape != skip_connection.shape:
                 x_up = F.interpolate(x_up, size=skip_connection.shape[2:], mode='trilinear', align_corners=True)
             
-            attention = self.attention_block(skip_connection, x) #x -> ouput before upsampling
+            attention = self.attention_block(skip_connection, x, i//2) #x -> ouput before upsampling
             x = torch.cat((attention, x_up), dim=1)
             x = self.decoder[i + 1](x) #Double conv
 

@@ -117,18 +117,17 @@ def get_3d_augmentation():
     return Compose([
         # LoadImaged(keys=["image", "mask"]),
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-        CropForegroundd(keys=["image", "mask"], source_key="mask"),
+        CropForegroundd(keys=["image", "mask"], source_key="mask", margin=128  ),
 
     # 2. Random crops, but prefer tumor areas!
         RandCropByPosNegLabeld(
             keys=["image", "mask"],
             label_key="mask",
-            spatial_size=(512, 512, 60),
-            pos=0.9,   # 90% probability to crop tumor (foreground)
-            neg=0.1,   # 10% probability to crop background (healthy)
-            num_samples=4,  # 4 patches from each volume
+            spatial_size=(128, 128, 32),
+            pos=1.0,  # Always focus on foreground (tumor)
+            neg=0.0,  # Never focus on background
+            num_samples=1,  # Only 1 crop per image
         ),
-
         RandBiasFieldd(keys=["image"], prob=0.3),
         RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
         RandGaussianNoised(keys=["image"], prob=0.3),
