@@ -105,6 +105,8 @@ class Trainer:
             print(f"Train loss: {avg_loss:.4f}")
             dice_coefficient(self.dataloader_val, self.model)
             save_predictions_as_img(self.dataloader_train, self.model, folder="saved_images/")
+            if epoch % 5 == 0:
+                self.save_checkpoint(epoch)
 
     #Putting in UTILS?
 
@@ -124,6 +126,18 @@ class Trainer:
             print("Early stop criteria met")
             return True
         return False
+    
+    def save_checkpoint(self, epoch):
+        save_dict = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'train_history': self.train_history,
+            'validation_history': self.validation_history,
+            'time': time.time() - self.start_time,
+        }
+        torch.save(save_dict, f"checkpoints/checkpoint_epoch_{epoch}.pth")
+        print(f"Checkpoint saved at epoch {epoch}.")
 
     def save_history(self, filename="train_history.json"):
         os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
@@ -142,3 +156,5 @@ class Trainer:
         with open(filename, "w") as f:
             json.dump(serializable, f, indent=4)
         print(f"=> Saved history to {filename}")
+
+
