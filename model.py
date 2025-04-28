@@ -40,6 +40,32 @@ class UNETBase(nn.Module):
             self.batchnorm(out_channels),
             nn.ReLU(inplace=True)
         )
+    def attention_block(self, skip, g):
+        """
+        skip : skip connection (from encoder)
+        g : gating signal (from decoder)
+        """
+        # Example: skip: (128, 128, 256) and g: (64, 64, 512)
+
+        # reduce shape of skip -> skip: (64, 64, 256)
+        theta_skip = self.conv(skip.size(1), skip.size(1), kernel_size=1, stride=2)(skip)
+        # reduce g channels -> g:(64, 64, 256)
+        phi_g = self.conv(g.size(1), skip.size(1) // 2, kernel_size=1, stride=1)(g)
+        
+        # Sum
+        f = torch.relu(theta_skip + phi_g)
+
+        # 1x1 conv to produce attention map of size (64, 64, 1)
+        psi = self.conv(f.size(1), 1, kernel_size=1, stride=1)(f)
+
+        # Attention map bewteen 0 and 1
+        psi = torch.sigmoid(psi)
+
+        # Upsample (128, 128, 256)
+        up = self.convtranspose(f.size(1), f.size(1), kernel_size = 2, stride = 2)
+        out = up*skip
+        return out
+
 
 
 class UNET(UNETBase):
@@ -100,7 +126,9 @@ class UNET3D(UNETBase):
             skip_connection = skip_connections[i // 2]
             if x.shape != skip_connection.shape:
                 x = F.interpolate(x, size=skip_connection.shape[2:], mode='trilinear', align_corners=True)
-            x = torch.cat((skip_connection, x), dim=1)
+            
+            attention = self.attention_block(skip_connection, x)
+            x = torch.cat((attention, x), dim=1)
             x = self.decoder[i + 1](x)
 
         return self.final_conv(x)
