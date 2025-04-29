@@ -81,7 +81,7 @@ class MedImgDataset3D(BaseDataset):
 
 class MedImgDataset2D(BaseDataset):
     def __init__(self, image_paths, mask_paths, augmentation = None, slice_axis=2, slice_idx=10, get_all_slices=False, num_slices = 50,
-                 keep_background_fraction=0.1):
+                 keep_background_fraction=0.2):
         super().__init__(image_paths, mask_paths)
         self.slice_axis = slice_axis
         self.slice_idx = slice_idx

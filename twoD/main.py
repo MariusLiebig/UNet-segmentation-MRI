@@ -25,7 +25,7 @@ def main():
     learning_rate = 1e-4
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     batch_size = 8
-    num_epochs = 10
+    num_epochs = 15
     train_set_size = 0.8
     image_height = 512
     image_width = 512
@@ -46,7 +46,7 @@ def main():
         ])
 
     img_paths, mask_paths = load_paths()
-    img_paths, mask_paths = img_paths[0:50], mask_paths[0:50]
+    img_paths, mask_paths = img_paths, mask_paths
 
     model = UNET(input_channels=1, output_channels=3).to(DEVICE)
     loss_fn = nn.BCEWithLogitsLoss()
