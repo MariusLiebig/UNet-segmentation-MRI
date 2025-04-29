@@ -10,6 +10,7 @@ import random
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import random
 
 #TODO: Add caching, data augmentation, and other preprocessing steps
 
@@ -38,15 +39,16 @@ class BaseDataset(Dataset):
     
 
 class MedImgDataset3D(BaseDataset):
-    def __init__(self, image_paths, mask_paths, augmentation=None):
+    def __init__(self, image_paths, mask_paths, augmentation):
         super().__init__(image_paths, mask_paths, augmentation)
 
     def __getitem__(self, idx):
         img = self.load_nii(self.image_paths[idx])
         mask = self.load_nii(self.mask_paths[idx])
         img, mask = np.expand_dims(img, axis=0), np.expand_dims(mask, axis=0)  # Add channel dimension
- 
-        img, mask = self.apply_augmentations(img, mask)
+
+        if self.augmentation is not None:
+            img, mask = self.apply_augmentations(img, mask)
 
         # Convert to tensors if not already
         if not isinstance(img, torch.Tensor):
@@ -62,20 +64,22 @@ class MedImgDataset3D(BaseDataset):
         return img, mask
 
     def apply_augmentations(self, image, mask):
-        
-        if self.augmentation:
-            # Always transpose (C, H, W, D) → (H, W, D, C)
-            # sum_dims = tuple(list(range(1, image.ndim)) + [0])
-            # image = np.transpose(image, sum_dims)
-            # mask = np.transpose(mask, sum_dims)
+        mean = 0.0
+        std = 1.0
 
-            data = {"image": image, "mask": mask}
-            augmented = self.augmentation(data)
-            
-            # After augmentation, return tensors
-            return augmented[0]["image"], augmented[0]["mask"]
+        img, msk = crop_resize(image, mask, output_shape=(random.randint(64, 300),random.randint(64, 300), random.randint(32, 52)))
+    
+        # Normalize image
+        img = img.astype(np.float32) / 255.0
+        img = (img - mean) / std
 
-        return image, mask
+        # Convert to tensors
+        msk = mask_to_class(msk)
+        # msk = torch.from_numpy(msk).long()
+        data = dict(image=img, mask=msk)
+        augmented = self.augmentation(data)
+
+        return augmented['image'].unsqueeze(0), augmented['mask']
 
 
 
@@ -148,6 +152,87 @@ class MedImgDataset2D(BaseDataset):
             augmented = self.augmentation(image=image, mask=mask)
             return augmented['image'], augmented['mask']
         return image, mask
+
+
+
+
+import numpy as np
+from scipy.ndimage import zoom
+
+def get_crop_coords(mask: np.ndarray):
+    mask = np.squeeze(mask)  # (H, W, D)
+    
+    coords = np.array(np.nonzero(mask))
+    y0, x0, z0 = coords.min(axis=1)
+    y1, x1, z1 = coords.max(axis=1)
+
+    # Convert to NumPy array before arithmetic operations
+    min_coords = np.maximum(np.array([y0, x0, z0]), 0)
+    max_coords = np.minimum(np.array([y1, x1, z1]), np.array(mask.shape) - 1)
+
+    y0, x0, z0 = min_coords
+    y1, x1, z1 = max_coords
+
+    return y0, y1, x0, x1, z0, z1
+
+
+def crop_resize(image: np.ndarray,
+                         mask: np.ndarray,
+                         output_shape=(128, 128, 32)):
+    """
+    Crop a 3D image and mask centered on the tumor bounding box,
+    with output shape exactly as specified.
+    Assumes input shape (H, W, D)
+    """
+    image = np.squeeze(image)  # (H, W, D)
+    mask = np.squeeze(mask)  # (H, W, D)
+    assert image.shape == mask.shape, "Image and mask must have the same shape"
+
+    H, W, D = image.shape
+    out_H, out_W, out_D = output_shape
+
+    # Get bounding box of the tumor
+    coords = np.array(np.nonzero(mask))  # shape (3, N)
+    y0, x0, z0 = coords.min(axis=1)
+    y1, x1, z1 = coords.max(axis=1)
+
+    # 1. Compute center of bounding box
+    cy = (y0 + y1) // 2
+    cx = (x0 + x1) // 2
+    cz = (z0 + z1) // 2
+
+    # 2. Compute start and end indices for cropping
+    y_start = max(cy - out_H // 2, 0)
+    x_start = max(cx - out_W // 2, 0)
+    z_start = max(cz - out_D // 2, 0)
+
+    y_end = y_start + out_H
+    x_end = x_start + out_W
+    z_end = z_start + out_D
+
+    # 3. Clamp end if exceeding bounds, then fix start accordingly
+    if y_end > H:
+        y_end = H
+        y_start = max(H - out_H, 0)
+    if x_end > W:
+        x_end = W
+        x_start = max(W - out_W, 0)
+    if z_end > D:
+        z_end = D
+        z_start = max(D - out_D, 0)
+
+    # 4. Final crop
+    img_crop = image[y_start:y_end, x_start:x_end, z_start:z_end]
+    msk_crop = mask[y_start:y_end, x_start:x_end, z_start:z_end]
+
+    return img_crop, msk_crop
+
+
+
+
+def mask_to_class(x, **kwargs):
+    x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
+    return x_new
 
 
 

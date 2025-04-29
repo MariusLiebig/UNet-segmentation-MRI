@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from functools import partial
 
 class UNETBase(nn.Module):
     def __init__(self, input_channels, output_channels, feature_size, conv, batchnorm, pool, convtranspose):
@@ -122,7 +123,7 @@ class UNET3D(UNETBase):
             output_channels=output_channels,
             feature_size=feature_size,
             conv=nn.Conv3d,
-            batchnorm=nn.BatchNorm3d,
+            batchnorm=partial(nn.InstanceNorm3d, affine=True),
             pool=nn.MaxPool3d,
             convtranspose=nn.ConvTranspose3d
         )
