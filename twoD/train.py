@@ -22,7 +22,7 @@ from metric import (
 
 class Trainer:
 
-    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 5):
+    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, scheduler, early_stop_count = 5):
         """
             Initialize our trainer class.
         """
@@ -35,6 +35,7 @@ class Trainer:
         self.optimizer = optimizer
         self.dataloader_train, self.dataloader_val = dataloaders
         self.scaler = scaler
+        self.scheduler = scheduler
 
         self.best_loss = float("inf")
         self.num_steps_per_val = len(self.dataloader_train) // 10
@@ -60,6 +61,10 @@ class Trainer:
         """
         loop = tqdm(self.dataloader_train, leave=True)
         running_loss = 0
+        running_correct = 0
+        running_total = 0
+        running_dice = 0
+
         num_batches = 0
         for img_batch, mask_batch in loop:
             img_batch, mask_batch= to_cuda(img_batch), to_cuda(mask_batch)
@@ -86,14 +91,18 @@ class Trainer:
 
             running_loss += loss.item()
             num_batches += 1
+#------------------------------- Dice accuracy -----------------------------------
+            dice_batch, _ = dice_coefficient([(img_batch, mask_batch)], self.model, num_classes=predictions.shape[1], device=img_batch.device)
+            running_dice += dice_batch
+#--------------------------------------------------------------------------------
+
             loop.set_postfix(loss=loss.item())
 
-
-
         avg_loss = running_loss / num_batches
-        return avg_loss
+        avg_dice = running_dice / num_batches
 
             #Adding learning rate scheduler?
+        return avg_loss, avg_dice
 
     
     def train(self):
@@ -101,13 +110,23 @@ class Trainer:
         for epoch in range(self.epochs):
             print(f"Epoch {epoch + 1}/{self.epochs}") #Epoch plus 1 because of 0 indexing
             intermidiate_time = time.time()
-            avg_loss = self.train_batch()
-            print(f"Train loss: {avg_loss:.4f}")
-            dice_coefficient(self.dataloader_val, self.model)
-            save_predictions_as_img(self.dataloader_train, self.model, folder="saved_images/")
-            if (epoch + 1) % 5 == 0:
-                self.save_checkpoint(epoch + 1)
 
+            avg_loss, avg_accuracy = self.train_batch()
+            print(f"Train accuracy: {avg_accuracy:.4f}")
+            print(f"Train loss: {avg_loss:.4f}")
+            self.train_history["accuracy"][self.global_step] = avg_accuracy
+            self.train_history["loss"][self.global_step] = avg_loss
+
+            val_acc, val_loss = dice_coefficient(self.dataloader_val, self.model, num_classes=3)
+            print(f"Validation accuracy: {val_acc:.4f}")
+            self.validation_history["loss"][self.global_step] = val_loss
+            self.validation_history["accuracy"][self.global_step] = val_acc
+
+            self.save_checkpoint(epoch + 1)
+            
+            self.scheduler.step(val_loss)
+            lr = self.optimizer.param_groups[0]['lr']
+            print(f" LR reduced?  new lr = {lr:.2e}")
     #Putting in UTILS?
 
     
