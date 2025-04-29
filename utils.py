@@ -72,18 +72,35 @@ def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     return train_loader, val_loader
 
 def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
-    full_dataset = MedImgDataset3D(image_paths, mask_paths, augmentation=augmentation)
-    print(f"Full dataset length: {len(full_dataset)}")
+    total_size = len(image_paths)
+    train_size = int(train_set_size * total_size)
+    val_size = total_size - train_size
 
-    train_size = int(train_set_size * len(full_dataset))
-    val_size = len(full_dataset) - train_size
+    # Random split of indices
+    indices = list(range(total_size))
+    np.random.shuffle(indices)
 
-    # Randomly split dataset
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:]
 
-    # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
+    train_img_paths = [image_paths[i] for i in train_indices]
+    train_mask_paths = [mask_paths[i] for i in train_indices]
+    val_img_paths = [image_paths[i] for i in val_indices]
+    val_mask_paths = [mask_paths[i] for i in val_indices]
+
+    print(f"Train image paths: {train_img_paths[0:2]}")
+    print(f"Train mask paths: {train_mask_paths[0:2]}")
+
+
+    train_dataset = MedImgDataset3D(train_img_paths, train_mask_paths, augmentation=augmentation)
+    val_dataset = MedImgDataset3D(val_img_paths, val_mask_paths, augmentation=None)  # usually no augmentation for validation
+
+    print(f"Training set size: {len(train_dataset)}, Validation set size: {len(val_dataset)}")
+
+    # 3. Create DataLoaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
+
     return train_loader, val_loader
 
 def load_paths():
@@ -98,9 +115,11 @@ def load_paths():
 
 
 def mask_to_class(x, **kwargs):
-    x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
+    #   raw x = [0, ~0.498, 1.0]
+    c1 = np.isclose(x, 127/255, atol=1e-2)   # everything near 0.498 → class 1
+    c2 = np.isclose(x,   1.0,     atol=1e-6) # exactly normalized 255 → class 2
+    return (c1.astype('uint8') + 2*c2.astype('uint8'))
 
-    return x_new
 
 
 
@@ -117,17 +136,7 @@ def get_3d_augmentation():
     return Compose([
         # LoadImaged(keys=["image", "mask"]),
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-        CropForegroundd(keys=["image", "mask"], source_key="mask", margin=32  ),
 
-    # 2. Random crops, but prefer tumor areas!
-        RandCropByPosNegLabeld(
-            keys=["image", "mask"],
-            label_key="mask",
-            spatial_size=(64, 64, 32),
-            pos=1.0,  # Always focus on foreground (tumor)
-            neg=0.0,  # Never focus on background
-            num_samples=1,  # Only 1 crop per image
-        ),
         RandBiasFieldd(keys=["image"], prob=0.3),
         RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
         RandGaussianNoised(keys=["image"], prob=0.3),
@@ -135,7 +144,7 @@ def get_3d_augmentation():
         # RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
         # RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
         RandZoomd(keys=["image", "mask"], min_zoom=0.9, max_zoom=1.1, prob=0.5),
-        mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
+        # mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
 
         ToTensord(keys=["image", "mask"]),
     ])

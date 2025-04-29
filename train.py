@@ -35,6 +35,7 @@ class Trainer:
         self.epochs = epochs    
         self.loss_fn = loss_fn
         self.model = model
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=3)
         self.model = to_cuda(self.model)
         self.optimizer = optimizer
         self.dataloader_train, self.dataloader_val = dataloaders
@@ -78,6 +79,14 @@ class Trainer:
         for img_batch, mask_batch in loop:
             img_batch, mask_batch = to_cuda(img_batch), to_cuda(mask_batch)
 
+            # Comes when cropping around the tumor
+            if img_batch.ndim == 6:                       # [B, N, C, H, W, D]
+                B, N, C, H, W, D = img_batch.shape
+                img_batch = img_batch.view(B * N, C, H, W, D)
+                # mask_batch was [B, N, H, W, D] or [B, N, 1, H, W, D] depending on your code
+                # make sure it's [B, N, H, W, D] here:
+                mask_batch = mask_batch.squeeze(2) if mask_batch.ndim == 6 else mask_batch
+                mask_batch = mask_batch.view(B * N, H, W, D)
 
             with autocast(device_type='cuda'):
                 predictions = self.model(img_batch)
@@ -134,12 +143,17 @@ class Trainer:
             self.train_history["accuracy"][self.global_step] = avg_accuracy
             self.train_history["loss"][self.global_step] = avg_loss
 
-            val_acc, val_loss = dice_coefficient(self.dataloader_val, self.model, num_classes=3)
+            val_acc, val_loss = dice_coefficient(self.dataloader_val, self.model, num_classes=3, loss_fn=None)
             print(f"Validation accuracy: {val_acc:.4f}")
+            print(f"Validation loss: {val_loss:.4f}")
             self.validation_history["loss"][self.global_step] = val_loss
             self.validation_history["accuracy"][self.global_step] = val_acc
 
-            if (epoch + 1) % 5 == 0:
+            self.scheduler.step(val_loss)
+            lr = self.optimizer.param_groups[0]['lr']
+            print(f" LR reduced?  new lr = {lr:.2e}")
+
+            if (epoch + 1) % 10 == 0:
                 self.save_checkpoint(epoch + 1)
                 self.save_predictions_as_nifti(self.dataloader_val, folder="saved_nifti/", max_examples=30)
             
@@ -173,6 +187,8 @@ class Trainer:
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'scaler_state_dict': self.scaler.state_dict(),
             'train_history': self.train_history,
             'validation_history': self.validation_history,
             'time': time.time() - self.start_time,

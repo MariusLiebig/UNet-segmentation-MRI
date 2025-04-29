@@ -11,9 +11,15 @@ from utils import to_cuda
 import torch.nn.functional as F
 
 from monai.networks.utils import one_hot
+import gc
+
 
 def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
+    # Ensure model is in eval mode, even for DataParallel
+    if isinstance(model, torch.nn.DataParallel):
+        model = model.module
     model.eval()
+
     total_dice = 0.0
     total_loss = 0.0
     n_batches = 0
@@ -21,17 +27,17 @@ def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
 
     with torch.no_grad():
         for imgs, masks in loader:
-            imgs = imgs.to(device)
-            masks = masks.to(device)
+            imgs = imgs.to(device, non_blocking=True)
+            masks = masks.to(device, non_blocking=True)
 
             if masks.ndim == 4 and masks.shape[1] == 1:
                 masks = masks.squeeze(1)
             elif masks.ndim == 5 and masks.shape[1] == 1: 
                 masks = masks.squeeze(1)
-                
 
             masks = masks.long()
 
+            # Forward pass
             logits = model(imgs)
             preds = logits.argmax(dim=1)
 
@@ -39,10 +45,12 @@ def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
                 loss = loss_fn(logits, masks)
                 total_loss += loss.item()
 
-            one_hot_dims = tuple(list([0, masks.ndim]) + list(range(1, masks.ndim))) #For 2D (0, 3, 2, 1) and for 3D (0, 4, 3, 2, 1)
+            # One-hot encoding
+            one_hot_dims = (0, masks.ndim) + tuple(range(1, masks.ndim))
             masks_onehot = F.one_hot(masks, num_classes=num_classes).permute(one_hot_dims).float()
             preds_onehot = F.one_hot(preds, num_classes=num_classes).permute(one_hot_dims).float()
 
+            # Dice calculation
             sum_dims = tuple(range(2, preds_onehot.ndim))  
             intersection = (preds_onehot * masks_onehot).sum(dim=sum_dims)
             cardinality = preds_onehot.sum(dim=sum_dims) + masks_onehot.sum(dim=sum_dims)
@@ -54,14 +62,16 @@ def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
             total_dice += dice_batch
             n_batches += 1
 
+            # Free up memory
+            del imgs, masks, logits, preds, masks_onehot, preds_onehot
+            torch.cuda.empty_cache()
+
     avg_dice = total_dice / max(1, n_batches)
     avg_loss = total_loss / max(1, n_batches) if loss_fn is not None else None
 
-    # print(f"Average Dice over {n_batches} batches: {avg_dice:.4f}")
-    if avg_loss is not None:
-        print(f"Average Validation Loss: {avg_loss:.4f}")
-
     model.train()
+    gc.collect()
+    torch.cuda.empty_cache()
 
     return avg_dice, avg_loss
 
@@ -107,7 +117,7 @@ class DiceLoss(nn.Module):
 class FocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2, reduction="mean"):
         super(FocalLoss, self).__init__()
-        self.alpha = alpha
+        self.alpha = 1
         self.gamma = gamma
         self.reduction = reduction
 
@@ -118,8 +128,8 @@ class FocalLoss(nn.Module):
         ce_loss = F.cross_entropy(logits, targets, reduction="none")  # [B, H, W, D]
         pt = torch.exp(-ce_loss)
 
-        alpha = self.alpha.view(1, -1, 1, 1, 1)  # shape (1, 3, 1, 1, 1)
-        focal_loss = alpha * (1 - pt) ** self.gamma * ce_loss
+        # alpha = self.alpha.view(1, -1, 1, 1, 1)  # shape (1, 3, 1, 1, 1)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
 
         if self.reduction == "mean":
             return focal_loss.mean()
