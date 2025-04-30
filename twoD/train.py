@@ -62,7 +62,7 @@ class Trainer:
         running_loss = 0
         num_batches = 0
         for img_batch, mask_batch in loop:
-            img_batch, mask_batch= to_cuda(img_batch), to_cuda(mask_batch)
+            img_batch, mask_batch= img_batch.to("cuda"), mask_batch.to("cuda")
             #predictions = self.model(img_batch)
             #loss = self.loss_fn(predictions, mask_batch)
             #loss.backward()

@@ -48,7 +48,13 @@ def main():
     img_paths, mask_paths = load_paths()
     img_paths, mask_paths = img_paths, mask_paths
 
-    model = UNET(input_channels=1, output_channels=3).to(DEVICE)
+    model = UNET(input_channels=1, output_channels=3)
+
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs!")
+        model = nn.DataParallel(model)
+    model = model.to(DEVICE)   
+
     loss_fn = nn.BCEWithLogitsLoss()
     weights = torch.tensor([0.1, 1.0, 1.0], device='cuda') #For class imbalance
     loss_fn =  CombinedLoss(num_classes=3)

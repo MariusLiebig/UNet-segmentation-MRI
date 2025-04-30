@@ -47,8 +47,8 @@ def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
     # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
     return train_loader, val_loader
 
 def load_paths():
