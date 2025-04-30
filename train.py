@@ -36,7 +36,10 @@ class Trainer:
         self.epochs = epochs    
         self.loss_fn = loss_fn
         self.model = model
-        self.scheduler =scheduler
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, mode='min', factor=0.5, patience=3, verbose=True
+                    )       
+    
         self.model = to_cuda(self.model)
         self.optimizer = optimizer
         self.dataloader_train, self.dataloader_val = dataloaders
@@ -58,8 +61,7 @@ class Trainer:
         self.train_history = dict(
             loss=collections.OrderedDict(),
             accuracy=collections.OrderedDict(),
-            pred_counts=collections.OrderedDict(),
-            class_counts=collections.OrderedDict(),
+            dice_per_class=collections.OrderedDict(),
         )
         self.inferer = inferer
         self.best_val_loss = float('inf')
@@ -87,9 +89,6 @@ class Trainer:
 
             with autocast(device_type='cuda'):
                 predictions = self.model(img_batch)
-                preds = predictions.argmax(dim=1)
-                pred_counts += torch.bincount(preds.flatten().cpu(), minlength=3)
-
 
                 if mask_batch.ndim == 4 and mask_batch.shape[1] == 1:#For 2D
                     mask_batch = mask_batch.squeeze(1)
@@ -98,12 +97,15 @@ class Trainer:
                     mask_batch = mask_batch.squeeze(1)
                     
                 mask_batch = mask_batch.long()
+                loss = self.loss_fn(predictions, mask_batch)
 
+
+                preds = predictions.argmax(dim=1)
+                pred_counts += torch.bincount(preds.flatten().cpu(), minlength=3)
                 counts = torch.bincount(mask_batch.flatten().cpu(), minlength=3)
                 class_counts += counts
 
 
-                loss = self.loss_fn(predictions, mask_batch)
 
  
 
@@ -113,7 +115,7 @@ class Trainer:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
-            self.scheduler.step()
+            # self.scheduler.step()
 
 
 
@@ -153,7 +155,9 @@ class Trainer:
             print(f"Train loss: {avg_loss:.4f}")
             self.train_history["accuracy"][self.global_step] = avg_dice
             self.train_history["loss"][self.global_step] = avg_loss
-            val_dice, val_loss, dice_per_class = dice_coefficient(self.dataloader_val, self.model, inferer = self.inferer, num_classes=3, loss_fn=None)
+            val_dice, val_loss, dice_per_class = dice_coefficient(self.dataloader_val, self.model, inferer = self.inferer, num_classes=3, loss_fn=self.loss_fn)
+            self.scheduler.step(val_loss)
+            
             print(f"Validation Dice: {val_dice:.4f}")
             self.validation_history["accuracy"][self.global_step] = val_dice
 

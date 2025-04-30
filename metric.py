@@ -90,15 +90,30 @@ def dice_coefficient(loader, model, inferer, loss_fn=None, num_classes=3, device
 from monai.networks.utils import one_hot
 
 class DiceLoss(nn.Module):
-    def __init__(self, num_classes, weights, smooth=1e-6):
+    def __init__(self, num_classes, smooth=1e-6):
         super(DiceLoss, self).__init__()
         self.num_classes = num_classes
         self.smooth = smooth
-        self.class_weights = torch.as_tensor(weights, dtype=torch.float32)
-        if not self.class_weights.is_cuda:
-            self.class_weights = self.class_weights.to('cuda')
+        # Dynamische Gewichtung basierend auf Klassenverteilung berechnen
+        self.class_weights = None  # Wird während des Trainings aktualisiert
 
+    def update_weights(self, masks):
+        # Berechne Volumen jeder Klasse
+        total_pixels = masks.numel()
+        class_counts = [(masks == c).sum().item() for c in range(self.num_classes)]
+        # Invertiere und normalisiere die Häufigkeiten
+        class_frequencies = [count / total_pixels for count in class_counts]
+        self.class_weights = torch.tensor(
+            [1.0 / (freq + 0.01) for freq in class_frequencies], 
+            device=masks.device
+        )
+        # Normalisiere Gewichte
+        self.class_weights = self.class_weights / self.class_weights.sum()
+        
     def forward(self, logits, targets):
+        # Aktualisiere Klassengewichte bei jedem Durchlauf
+        if self.class_weights is None:
+            self.update_weights(targets)
         if logits.ndim == 5 :
             B, C, H, W, D = logits.shape
         else:

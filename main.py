@@ -78,16 +78,7 @@ def run_training(model_class, data_loader_fn, augmentation_fn, inferer,  checkpo
 
 
     optimizer = optim.Adam(model.parameters(), lr=CONFIG["learning_rate"], weight_decay=1e-5)
-    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.2, patience=3)
-    steps = len(train_loader) * CONFIG["num_epochs"]
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=1e-3,        # a bit higher than your current 1e-4
-        total_steps=steps,
-        pct_start=0.3,
-        anneal_strategy="cos",
-    )
-    
+
     scaler = GradScaler()
 
      # Load saved weights

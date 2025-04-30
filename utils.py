@@ -32,7 +32,12 @@ from monai.transforms import (
     ToTensord,
     CropForegroundd,
     RandCropByPosNegLabeld,
+    RandAdjustContrastd,
+    RandGaussianSmoothd,
+    RandAffined,
 )
+
+
 from data.loader import MedImgDataset2D, MedImgDataset3D
 from config import CONFIG
 
@@ -140,12 +145,28 @@ def get_3d_augmentation():
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
         # Orientationd(keys=["image", "label"], axcodes="RAS"),
         # Spacingd(keys=["image", "label"], pixdim=(0.5, 0.5, 2.0), mode=("bilinear", "nearest")),
-        # RandBiasFieldd(keys=["image"], prob=0.3),   
-        RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
-        RandGaussianNoised(keys=["image"], prob=0.3),
-        # RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
-        # RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
-        # RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
+# Aktiviere diese Transformationen
+        RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
+        RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
+        RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
+        
+        # Intensitätstransformationen verstärken
+        RandBiasFieldd(keys=["image"], prob=0.3),
+        RandShiftIntensityd(keys=["image"], offsets=0.2, prob=0.7),
+        RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.1),
+        
+        # Zusätzliche Transformationen
+        RandAdjustContrastd(keys=["image"], prob=0.3),
+        RandGaussianSmoothd(keys=["image"], prob=0.2, sigma_x=(0.5, 1.0)),
+        
+        # Elastische Deformation für realistische Variationen
+        RandAffined(
+            keys=["image", "mask"],
+            prob=0.3,
+            rotate_range=(0.05, 0.05, 0.05),
+            scale_range=(0.1, 0.1, 0.1),
+            mode=("bilinear", "nearest"),
+        ),
         RandZoomd(keys=["image", "mask"], min_zoom=0.9, max_zoom=1.1, prob=0.5),
         # mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
 

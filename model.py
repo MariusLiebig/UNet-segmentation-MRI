@@ -65,22 +65,21 @@ class UNETBase(nn.Module):
         idx : which attention block (layer index)
         """
 
-        # Apply predefined conv layers
+        # Reduziere Komplexität mit einem einfacheren Attention-Gate
         theta_skip = self.attention_theta[idx](skip)
         phi_g = self.attention_phi[idx](g)
-
+        
+        # Größenanpassung für kompatible Addition
         if phi_g.shape != theta_skip.shape:
-            phi_g = F.interpolate(phi_g, size=theta_skip.shape[2:], mode='trilinear', align_corners=True)
+            phi_g = F.interpolate(phi_g, size=theta_skip.shape[2:], 
+                                mode='trilinear', align_corners=True)
+        
+        # Attention-Map einfacher berechnen
         f = torch.relu(theta_skip + phi_g)
-        psi = torch.sigmoid(self.attention_psi[idx](f))
-
-        up = self.attention_upsample[idx](psi)
-
-
-        if up.shape != skip.shape:
-            up = F.interpolate(up, size=skip.shape[2:], mode='trilinear', align_corners=True)
-        out = up * skip
-        return out
+        attention_map = torch.sigmoid(self.attention_psi[idx](f))
+        
+        # Direkte Anwendung ohne weitere Upsample-Operation
+        return skip * attention_map
 
 
 
