@@ -67,7 +67,8 @@ class MedImgDataset3D(BaseDataset):
         mean = 0.0
         std = 1.0
 
-        img, msk = crop_resize(image, mask, output_shape=(random.randint(64, 300),random.randint(64, 300), random.randint(32, 52)))
+        # img, msk = crop_resize(image, mask, output_shape=(random.randint(64, 300),random.randint(64, 300), random.randint(32, 52)))
+        img, msk = crop_resize(image, mask, output_shape=(128, 128, 32), background_prob=0.2)
     
         # Normalize image
         img = img.astype(np.float32) / 255.0
@@ -156,52 +157,46 @@ class MedImgDataset2D(BaseDataset):
 
 
 
+
+
 import numpy as np
-from scipy.ndimage import zoom
-
-def get_crop_coords(mask: np.ndarray):
-    mask = np.squeeze(mask)  # (H, W, D)
-    
-    coords = np.array(np.nonzero(mask))
-    y0, x0, z0 = coords.min(axis=1)
-    y1, x1, z1 = coords.max(axis=1)
-
-    # Convert to NumPy array before arithmetic operations
-    min_coords = np.maximum(np.array([y0, x0, z0]), 0)
-    max_coords = np.minimum(np.array([y1, x1, z1]), np.array(mask.shape) - 1)
-
-    y0, x0, z0 = min_coords
-    y1, x1, z1 = max_coords
-
-    return y0, y1, x0, x1, z0, z1
-
+import random
 
 def crop_resize(image: np.ndarray,
-                         mask: np.ndarray,
-                         output_shape=(128, 128, 32)):
+                mask: np.ndarray,
+                output_shape=(128, 128, 32),
+                background_prob=0.2):
     """
-    Crop a 3D image and mask centered on the tumor bounding box,
-    with output shape exactly as specified.
-    Assumes input shape (H, W, D)
+    Crop a 3D image and mask centered on tumor (non-zero region),
+    or randomly sample background with `background_prob`.
+    Output shape is fixed as specified (H, W, D).
     """
     image = np.squeeze(image)  # (H, W, D)
-    mask = np.squeeze(mask)  # (H, W, D)
+    mask = np.squeeze(mask)
     assert image.shape == mask.shape, "Image and mask must have the same shape"
 
     H, W, D = image.shape
     out_H, out_W, out_D = output_shape
 
-    # Get bounding box of the tumor
-    coords = np.array(np.nonzero(mask))  # shape (3, N)
-    y0, x0, z0 = coords.min(axis=1)
-    y1, x1, z1 = coords.max(axis=1)
+    # Decide whether to do tumor-centered crop or background crop
+    force_background = random.random() < background_prob or np.sum(mask) == 0
 
-    # 1. Compute center of bounding box
-    cy = (y0 + y1) // 2
-    cx = (x0 + x1) // 2
-    cz = (z0 + z1) // 2
+    if not force_background:
+        # --- Tumor-centered crop ---
+        coords = np.array(np.nonzero(mask))  # shape (3, N)
+        y0, x0, z0 = coords.min(axis=1)
+        y1, x1, z1 = coords.max(axis=1)
 
-    # 2. Compute start and end indices for cropping
+        cy = (y0 + y1) // 2
+        cx = (x0 + x1) // 2
+        cz = (z0 + z1) // 2
+    else:
+        # --- Random background crop ---
+        cy = random.randint(out_H // 2, H - out_H // 2)
+        cx = random.randint(out_W // 2, W - out_W // 2)
+        cz = random.randint(out_D // 2, D - out_D // 2)
+
+    # Compute crop bounds
     y_start = max(cy - out_H // 2, 0)
     x_start = max(cx - out_W // 2, 0)
     z_start = max(cz - out_D // 2, 0)
@@ -210,25 +205,22 @@ def crop_resize(image: np.ndarray,
     x_end = x_start + out_W
     z_end = z_start + out_D
 
-    # 3. Clamp end if exceeding bounds, then fix start accordingly
+    # Clamp to valid range
     if y_end > H:
         y_end = H
-        y_start = max(H - out_H, 0)
+        y_start = H - out_H
     if x_end > W:
         x_end = W
-        x_start = max(W - out_W, 0)
+        x_start = W - out_W
     if z_end > D:
         z_end = D
-        z_start = max(D - out_D, 0)
+        z_start = D - out_D
 
-    # 4. Final crop
+    # Final crop
     img_crop = image[y_start:y_end, x_start:x_end, z_start:z_end]
     msk_crop = mask[y_start:y_end, x_start:x_end, z_start:z_end]
 
     return img_crop, msk_crop
-
-
-
 
 def mask_to_class(x, **kwargs):
     x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2

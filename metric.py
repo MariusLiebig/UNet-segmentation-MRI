@@ -12,6 +12,7 @@ import torch.nn.functional as F
 
 from monai.networks.utils import one_hot
 import gc
+from monai.inferers import SlidingWindowInferer
 
 
 def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
@@ -24,6 +25,14 @@ def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
     total_loss = 0.0
     n_batches = 0
     eps = 1e-6
+
+    inferer = SlidingWindowInferer(
+        roi_size=(64, 64, 32),     # patch size (z,y,x)
+        sw_batch_size=1,             # how many patches at once (can be >1 if memory allows)
+        overlap=0.5,                 # % overlap between patches
+        mode='gaussian'              # blending mode: 'constant', 'gaussian', etc.
+        )
+        
 
     with torch.no_grad():
         for imgs, masks in loader:
@@ -38,7 +47,8 @@ def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
             masks = masks.long()
 
             # Forward pass
-            logits = model(imgs)
+            logits = inferer(inputs=imgs, network=model)
+            # logits = model(imgs)
             preds = logits.argmax(dim=1)
 
             if loss_fn is not None:

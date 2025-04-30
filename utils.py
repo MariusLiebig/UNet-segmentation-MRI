@@ -99,7 +99,7 @@ def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_s
 
     # 3. Create DataLoaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
 
     return train_loader, val_loader
 

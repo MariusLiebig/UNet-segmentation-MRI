@@ -145,11 +145,11 @@ class Trainer:
 
             val_acc, val_loss = dice_coefficient(self.dataloader_val, self.model, num_classes=3, loss_fn=None)
             print(f"Validation accuracy: {val_acc:.4f}")
-            print(f"Validation loss: {val_loss:.4f}")
-            self.validation_history["loss"][self.global_step] = val_loss
+            # print(f"Validation loss: {val_loss:.4f}")
+            # self.validation_history["loss"][self.global_step] = val_loss
             self.validation_history["accuracy"][self.global_step] = val_acc
 
-            self.scheduler.step(val_loss)
+            self.scheduler.step(val_acc)
             lr = self.optimizer.param_groups[0]['lr']
             print(f" LR reduced?  new lr = {lr:.2e}")
 
