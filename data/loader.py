@@ -39,48 +39,85 @@ class BaseDataset(Dataset):
     
 
 class MedImgDataset3D(BaseDataset):
-    def __init__(self, image_paths, mask_paths, augmentation):
+    def __init__(self, image_paths, mask_paths, augmentation, n_crops = 4):
         super().__init__(image_paths, mask_paths, augmentation)
+        self.current_volume_idx = -1
+        self.current_crops = []
+        self.n_crops = n_crops
 
     def __getitem__(self, idx):
-        img = self.load_nii(self.image_paths[idx])
-        mask = self.load_nii(self.mask_paths[idx])
-        img, mask = np.expand_dims(img, axis=0), np.expand_dims(mask, axis=0)  # Add channel dimension
+        if self.augmentation is None:
+            img = self.load_nii(self.image_paths[volume_idx])
+            mask = self.load_nii(self.mask_paths[volume_idx])
+            img = np.expand_dims(img, axis=0)    # (1, H, W, D)
+            mask = np.expand_dims(mask, axis=0)  # (1, H, W, D)
+            return img, mask
+        else:
+            volume_idx = idx // self.n_crops
+            crop_idx = idx % self.n_crops
 
+            # Load and cache new volume + crops if we moved to a new volume
+            if volume_idx != self.current_volume_idx:
+                img = self.load_nii(self.image_paths[volume_idx])
+                mask = self.load_nii(self.mask_paths[volume_idx])
+                img = np.expand_dims(img, axis=0)    # (1, H, W, D)
+                mask = np.expand_dims(mask, axis=0)  # (1, H, W, D)
+
+                if self.augmentation is not None:
+                    self.current_crops = self.apply_augmentations(img, mask)
+                else:
+                    raise NotImplementedError("You must provide augmentation that returns multiple crops.")
+
+                self.current_volume_idx = volume_idx
+
+            image, mask = self.current_crops[crop_idx]
+
+            assert image.shape[1:] == mask.shape, f"Shape mismatch: image {image.shape}, mask {mask.shape}"
+            assert isinstance(image, torch.Tensor), "Image must be a torch.Tensor"
+            assert isinstance(mask, torch.Tensor), "Mask must be a torch.Tensor"
+            assert image.ndim == 4, f"Image must have 4 dimensions, got {image.ndim}"
+
+            return image, mask
+
+    def __len__(self):
         if self.augmentation is not None:
-            img, mask = self.apply_augmentations(img, mask)
-
-        # Convert to tensors if not already
-        if not isinstance(img, torch.Tensor):
-            img = torch.tensor(img).float()
+            return len(self.image_paths) * self.n_crops  # self.n_crops crops per volume
         else:
-            img = img.clone().detach().float()
+            return len(self.image_paths)
 
-        if not isinstance(mask, torch.Tensor):
-            mask = torch.tensor(mask).float()
-        else:
-            mask = mask.clone().detach().float()
 
-        return img, mask
 
     def apply_augmentations(self, image, mask):
         mean = 0.0
         std = 1.0
 
-        # img, msk = crop_resize(image, mask, output_shape=(random.randint(64, 300),random.randint(64, 300), random.randint(32, 52)))
-        img, msk = crop_resize(image, mask, output_shape=(128, 128, 32), background_prob=0.2)
-    
-        # Normalize image
-        img = img.astype(np.float32) / 255.0
-        img = (img - mean) / std
+        # Get all crops (mixed tumor and background)
+        crops = crop_resize_multiple(image, mask, output_shape=(64, 64, 32), background_fraction=0.2, num_crops=self.n_crops)
 
-        # Convert to tensors
-        msk = mask_to_class(msk)
-        # msk = torch.from_numpy(msk).long()
-        data = dict(image=img, mask=msk)
-        augmented = self.augmentation(data)
+        if not crops:
+            raise ValueError("No valid crops generated.")
 
-        return augmented['image'].unsqueeze(0), augmented['mask']
+        augmented_crops = []
+
+        for img, msk in crops:
+            # Normalize image
+            img = img.astype(np.float32) / 255.0
+            img = (img - mean) / std
+
+            # Convert mask to class labels
+            msk = mask_to_class(msk)
+
+            # Albumentations expects a dict
+            data = dict(image=img, mask=msk)
+            augmented = self.augmentation(data)
+
+            # Add channel dimension to image → shape becomes (1, H, W, D)
+            img_tensor = augmented['image'].unsqueeze(0)
+            msk_tensor = augmented['mask']
+
+            augmented_crops.append((img_tensor, msk_tensor))
+
+        return augmented_crops  # List of (image, mask) tuples
 
 
 
@@ -164,7 +201,7 @@ import random
 
 def crop_resize(image: np.ndarray,
                 mask: np.ndarray,
-                output_shape=(128, 128, 32),
+                output_shape=(32, 32, 32),
                 background_prob=0.2):
     """
     Crop a 3D image and mask centered on tumor (non-zero region),
@@ -225,6 +262,88 @@ def crop_resize(image: np.ndarray,
 def mask_to_class(x, **kwargs):
     x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
     return x_new
+
+
+def crop_resize_multiple(image: np.ndarray,
+                         mask: np.ndarray,
+                         output_shape=(32, 32, 32),
+                         num_crops=4,
+                         background_fraction=0.2,
+                         margin_ratio=0.25):
+    """
+    Returns a mix of tumor-containing and background-only crops.
+    - At least (1 - background_fraction) of crops will contain tumor
+    - output_shape: (H, W, D)
+    """
+    image = np.squeeze(image)
+    mask = np.squeeze(mask)
+    assert image.shape == mask.shape, "Image and mask must have the same shape"
+
+    H, W, D = image.shape
+    out_H, out_W, out_D = output_shape
+
+    coords = np.array(np.nonzero(mask))
+    if coords.shape[1] == 0:
+        raise ValueError("No tumor found in mask.")
+
+    y0, x0, z0 = coords.min(axis=1)
+    y1, x1, z1 = coords.max(axis=1)
+
+    # Define tumor region with margin
+    margin_y = int(out_H * margin_ratio)
+    margin_x = int(out_W * margin_ratio)
+    margin_z = int(out_D * margin_ratio)
+
+    y_range = (max(y0 - margin_y, out_H // 2), min(y1 + margin_y, H - out_H // 2))
+    x_range = (max(x0 - margin_x, out_W // 2), min(x1 + margin_x, W - out_W // 2))
+    z_range = (max(z0 - margin_z, out_D // 2), min(z1 + margin_z, D - out_D // 2))
+
+    crops = []
+    num_background = int(num_crops * background_fraction)
+    num_tumor = num_crops - num_background
+
+    def extract_crop(cy, cx, cz):
+        y_start = max(cy - out_H // 2, 0)
+        x_start = max(cx - out_W // 2, 0)
+        z_start = max(cz - out_D // 2, 0)
+
+        y_end = y_start + out_H
+        x_end = x_start + out_W
+        z_end = z_start + out_D
+
+        if y_end > H or x_end > W or z_end > D:
+            return None, None
+
+        img_crop = image[y_start:y_end, x_start:x_end, z_start:z_end]
+        msk_crop = mask[y_start:y_end, x_start:x_end, z_start:z_end]
+        return img_crop, msk_crop
+
+    # --- Tumor crops ---
+    attempts = 0
+    while len(crops) < num_tumor and attempts < 100:
+        cy = random.randint(*y_range)
+        cx = random.randint(*x_range)
+        cz = random.randint(*z_range)
+        img_crop, msk_crop = extract_crop(cy, cx, cz)
+        if img_crop is not None and np.any(msk_crop):
+            crops.append((img_crop, msk_crop))
+        attempts += 1
+
+    # --- Background crops ---
+    attempts = 0
+    while len(crops) < num_crops and attempts < 100:
+        cy = random.randint(out_H // 2, H - out_H // 2)
+        cx = random.randint(out_W // 2, W - out_W // 2)
+        cz = random.randint(out_D // 2, D - out_D // 2)
+        img_crop, msk_crop = extract_crop(cy, cx, cz)
+        if img_crop is not None and not np.any(msk_crop):
+            crops.append((img_crop, msk_crop))
+        attempts += 1
+
+    if len(crops) < num_crops:
+        print(f"Warning: only {len(crops)} valid crops were generated.")
+
+    return crops
 
 
 

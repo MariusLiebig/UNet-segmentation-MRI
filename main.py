@@ -108,4 +108,4 @@ if __name__ == '__main__':
     if args.d2:
         run_training(UNET, data_loader2D, get_2d_augmentation)
     else:
-        run_training(UNET3D, data_loader3D, get_3d_augmentation)
+        run_training(UNET3D, data_loader3D, get_3d_augmentation,"checkpoints/checkpoint_epoch_10.pth" )

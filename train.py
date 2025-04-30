@@ -44,7 +44,6 @@ class Trainer:
         self.best_loss = float("inf")
         self.num_steps_per_val = len(self.dataloader_train) // 10
         self.global_step = 0
-        self.local_step = 0
         self.start_time = time.time()
 
         self.early_stop_count = early_stop_count 
@@ -109,8 +108,6 @@ class Trainer:
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
-            self.local_step += 1
-            self.validation_history["loss_per_step"][self.local_step] = loss.item()
 
             num_batches += 1
             running_loss += loss.item()

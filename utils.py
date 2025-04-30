@@ -88,8 +88,10 @@ def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     val_img_paths = [image_paths[i] for i in val_indices]
     val_mask_paths = [mask_paths[i] for i in val_indices]
 
-    print(f"Train image paths: {train_img_paths[0:2]}")
-    print(f"Train mask paths: {train_mask_paths[0:2]}")
+    print(f"Train image paths: {len(train_img_paths)}")
+    print(f"Train mask paths: {len(train_mask_paths)}")
+    print(f"Validation image paths: {len(val_img_paths)}")
+    print(f"Validation mask paths: {len(val_mask_paths)}")
 
 
     train_dataset = MedImgDataset3D(train_img_paths, train_mask_paths, augmentation=augmentation)
