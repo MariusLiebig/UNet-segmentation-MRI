@@ -47,8 +47,8 @@ class MedImgDataset3D(BaseDataset):
 
     def __getitem__(self, idx):
         if self.augmentation is None:
-            img = self.load_nii(self.image_paths[volume_idx])
-            mask = self.load_nii(self.mask_paths[volume_idx])
+            img = self.load_nii(self.image_paths[idx])
+            mask = self.load_nii(self.mask_paths[idx])
             img = np.expand_dims(img, axis=0)    # (1, H, W, D)
             mask = np.expand_dims(mask, axis=0)  # (1, H, W, D)
             return img, mask
