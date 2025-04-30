@@ -155,7 +155,6 @@ class Trainer:
 
             if (epoch + 1) % 10 == 0:
                 self.save_checkpoint(epoch + 1)
-                self.save_predictions_as_nifti(self.dataloader_val, folder="saved_nifti/", max_examples=30)
             
                 self.save_training_history()
 
