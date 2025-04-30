@@ -7,18 +7,11 @@ import torch.nn as nn
 
 from utils import to_cuda
 
-def dice_coefficient(loader, model, num_classes=3, device="cuda"):
-    """
-    Computes average Dice score over a DataLoader for multi-class segmentation.
 
-    Args:
-        loader      : DataLoader yielding (imgs, masks), where masks have values in {0..num_classes-1}
-        model       : Model outputting logits of shape (B, num_classes, H, W)
-        num_classes : Number of segmentation classes
-        device      : 'cuda' or 'cpu'
-    """
+def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
     model.eval()
     total_dice = 0.0
+    total_loss = 0.0
     n_batches = 0
     eps = 1e-6
 
@@ -28,36 +21,45 @@ def dice_coefficient(loader, model, num_classes=3, device="cuda"):
             masks = masks.to(device)
 
             if masks.ndim == 4 and masks.shape[1] == 1:
-                masks = masks.squeeze(1)  # convert (B, 1, H, W) → (B, H, W)
+                masks = masks.squeeze(1)
+            elif masks.ndim == 5 and masks.shape[1] == 1: 
+                masks = masks.squeeze(1)
+                
 
-            masks = masks.long()  # Ensure class indices
+            masks = masks.long()
 
-            # Forward
-            logits = model(imgs)  # (B, C, H, W)
-            preds = logits.argmax(dim=1)  # (B, H, W)
+            logits = model(imgs)
+            preds = logits.argmax(dim=1)
 
-            # One-hot encode to (B, C, H, W)
-            masks_onehot = F.one_hot(masks, num_classes=num_classes)  # (B, H, W, C)
-            masks_onehot = masks_onehot.permute(0, 3, 1, 2).float()    # → (B, C, H, W)
+            if loss_fn is not None:
+                loss = loss_fn(logits, masks)
+                total_loss += loss.item()
 
-            preds_onehot = F.one_hot(preds, num_classes=num_classes)  # (B, H, W, C)
-            preds_onehot = preds_onehot.permute(0, 3, 1, 2).float()
+            one_hot_dims = tuple(list([0, masks.ndim]) + list(range(1, masks.ndim))) #For 2D (0, 3, 2, 1) and for 3D (0, 4, 3, 2, 1)
+            masks_onehot = F.one_hot(masks, num_classes=num_classes).permute(one_hot_dims).float()
+            preds_onehot = F.one_hot(preds, num_classes=num_classes).permute(one_hot_dims).float()
 
-            # Dice computation
-            intersection = (preds_onehot * masks_onehot).sum(dim=(2, 3))  # (B, C)
-            cardinality = preds_onehot.sum(dim=(2, 3)) + masks_onehot.sum(dim=(2, 3))  # (B, C)
+            sum_dims = tuple(range(2, preds_onehot.ndim))  
+            intersection = (preds_onehot * masks_onehot).sum(dim=sum_dims)
+            cardinality = preds_onehot.sum(dim=sum_dims) + masks_onehot.sum(dim=sum_dims)
 
-            dice_per_class = (2. * intersection + eps) / (cardinality + eps)  # (B, C)
-            dice_per_sample = dice_per_class.mean(dim=1)  # average over classes → (B,)
+            dice_per_class = (2. * intersection + eps) / (cardinality + eps)
+            dice_per_sample = dice_per_class.mean(dim=1)
             dice_batch = dice_per_sample.mean().item()
 
             total_dice += dice_batch
             n_batches += 1
 
     avg_dice = total_dice / max(1, n_batches)
-    print(f"Average Dice over {n_batches} batches: {avg_dice:.4f}")
+    avg_loss = total_loss / max(1, n_batches) if loss_fn is not None else None
+
+    # print(f"Average Dice over {n_batches} batches: {avg_dice:.4f}")
+    if avg_loss is not None:
+        print(f"Average Validation Loss: {avg_loss:.4f}")
+
     model.train()
-    return avg_dice
+
+    return avg_dice, avg_loss
 
 
 

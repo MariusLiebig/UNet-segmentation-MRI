@@ -126,8 +126,8 @@ def predict_and_save_volume(model, input_path, save_path, device="cuda"):
 
 
 if __name__ == "__main__":
-    checkpoint_path = "checkpoints/checkpoint_epoch_10.pth"
-    img_path = "train/4/preRT/4_preRT_T2.nii.gz"
+    checkpoint_path = "checkpoints/checkpoint_epoch_20.pth"
+    img_path = "train/10/preRT/10_preRT_T2.nii.gz"
             
     image_paths = os.path.join(base_path, img_path) 
     save_path = "predictions/pred_new_image.nii.gz"

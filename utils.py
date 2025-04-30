@@ -30,6 +30,8 @@ from monai.transforms import (
     NormalizeIntensityd,
     RandZoomd,
     ToTensord,
+    CropForegroundd,
+    RandCropByPosNegLabeld,
 )
 from data.loader import MedImgDataset2D, MedImgDataset3D
 from config import CONFIG
@@ -70,18 +72,37 @@ def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     return train_loader, val_loader
 
 def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
-    full_dataset = MedImgDataset3D(image_paths, mask_paths, augmentation=augmentation)
-    print(f"Full dataset length: {len(full_dataset)}")
+    total_size = len(image_paths)
+    train_size = int(train_set_size * total_size)
+    val_size = total_size - train_size
 
-    train_size = int(train_set_size * len(full_dataset))
-    val_size = len(full_dataset) - train_size
+    # Random split of indices
+    indices = list(range(total_size))
+    np.random.shuffle(indices)
 
-    # Randomly split dataset
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:]
 
-    # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
+    train_img_paths = [image_paths[i] for i in train_indices]
+    train_mask_paths = [mask_paths[i] for i in train_indices]
+    val_img_paths = [image_paths[i] for i in val_indices]
+    val_mask_paths = [mask_paths[i] for i in val_indices]
+
+    print(f"Train image paths: {len(train_img_paths)}")
+    print(f"Train mask paths: {len(train_mask_paths)}")
+    print(f"Validation image paths: {len(val_img_paths)}")
+    print(f"Validation mask paths: {len(val_mask_paths)}")
+
+
+    train_dataset = MedImgDataset3D(train_img_paths, train_mask_paths, augmentation=augmentation)
+    val_dataset = MedImgDataset3D(val_img_paths, val_mask_paths, augmentation=None)  # usually no augmentation for validation
+
+    print(f"Training set size: {len(train_dataset)}, Validation set size: {len(val_dataset)}")
+
+    # 3. Create DataLoaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
+
     return train_loader, val_loader
 
 def load_paths():
@@ -96,9 +117,11 @@ def load_paths():
 
 
 def mask_to_class(x, **kwargs):
-    x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
+    #   raw x = [0, ~0.498, 1.0]
+    c1 = np.isclose(x, 127/255, atol=1e-2)   # everything near 0.498 → class 1
+    c2 = np.isclose(x,   1.0,     atol=1e-6) # exactly normalized 255 → class 2
+    return (c1.astype('uint8') + 2*c2.astype('uint8'))
 
-    return x_new
 
 
 
@@ -115,17 +138,15 @@ def get_3d_augmentation():
     return Compose([
         # LoadImaged(keys=["image", "mask"]),
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
+
         RandBiasFieldd(keys=["image"], prob=0.3),
         RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
         RandGaussianNoised(keys=["image"], prob=0.3),
-        RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
-        RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
-        RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
-        RandRotate90d(keys=["image", "mask"], prob=0.5, max_k=3),
+        # RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
+        # RandFlipd(keys=["image", "mask"], spatial_axis=[1], prob=0.5),
+        # RandFlipd(keys=["image", "mask"], spatial_axis=[2], prob=0.5),
         RandZoomd(keys=["image", "mask"], min_zoom=0.9, max_zoom=1.1, prob=0.5),
-        RandSpatialCropd(keys=["image", "mask"], roi_size=(128, 128, 64), random_center=True, random_size=False),
-        mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
-        mt.ResizeD(keys=["image", "mask"], spatial_size=(CONFIG["image_height"], CONFIG["image_width"], CONFIG["image_depth"])),
+        # mt.Lambda(lambda data: {"mask": mask_to_class(data["mask"]), "image": data["image"]}),
 
         ToTensord(keys=["image", "mask"]),
     ])

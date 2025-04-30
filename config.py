@@ -2,8 +2,8 @@ import torch
 CONFIG = {
     "learning_rate": 1e-4,
     "batch_size": 1,
-    "num_epochs": 40,
-    "train_set_size": 0.8,
+    "num_epochs": 100,
+    "train_set_size": 0.9,
     "image_height": 512,
     "image_width": 512,
     "image_depth": 60,
@@ -13,7 +13,7 @@ CONFIG = {
 
     "input_channels": 1,
     "output_channels": 3,
-    "feature_sizes": [32, 64, 128, 256, 512],
+    "feature_sizes": [16, 32, 64, 128, 256],
 
 }
 

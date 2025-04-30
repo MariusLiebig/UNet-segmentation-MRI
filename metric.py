@@ -11,38 +11,56 @@ from utils import to_cuda
 import torch.nn.functional as F
 
 from monai.networks.utils import one_hot
+import gc
+from monai.inferers import SlidingWindowInferer
+
 
 def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
+    # Ensure model is in eval mode, even for DataParallel
+    if isinstance(model, torch.nn.DataParallel):
+        model = model.module
     model.eval()
+
     total_dice = 0.0
     total_loss = 0.0
     n_batches = 0
     eps = 1e-6
 
+    inferer = SlidingWindowInferer(
+        roi_size=(64, 64, 32),     # patch size (z,y,x)
+        sw_batch_size=1,             # how many patches at once (can be >1 if memory allows)
+        overlap=0.5,                 # % overlap between patches
+        mode='gaussian'              # blending mode: 'constant', 'gaussian', etc.
+        )
+        
+
     with torch.no_grad():
         for imgs, masks in loader:
-            imgs = imgs.to(device)
-            masks = masks.to(device)
+            imgs = imgs.to(device, non_blocking=True)
+            masks = masks.to(device, non_blocking=True)
 
             if masks.ndim == 4 and masks.shape[1] == 1:
                 masks = masks.squeeze(1)
             elif masks.ndim == 5 and masks.shape[1] == 1: 
                 masks = masks.squeeze(1)
-                
 
             masks = masks.long()
 
-            logits = model(imgs)
+            # Forward pass
+            logits = inferer(inputs=imgs, network=model)
+            # logits = model(imgs)
             preds = logits.argmax(dim=1)
 
             if loss_fn is not None:
                 loss = loss_fn(logits, masks)
                 total_loss += loss.item()
 
-            one_hot_dims = tuple(list([0, masks.ndim]) + list(range(1, masks.ndim))) #For 2D (0, 3, 2, 1) and for 3D (0, 4, 3, 2, 1)
+            # One-hot encoding
+            one_hot_dims = (0, masks.ndim) + tuple(range(1, masks.ndim))
             masks_onehot = F.one_hot(masks, num_classes=num_classes).permute(one_hot_dims).float()
             preds_onehot = F.one_hot(preds, num_classes=num_classes).permute(one_hot_dims).float()
 
+            # Dice calculation
             sum_dims = tuple(range(2, preds_onehot.ndim))  
             intersection = (preds_onehot * masks_onehot).sum(dim=sum_dims)
             cardinality = preds_onehot.sum(dim=sum_dims) + masks_onehot.sum(dim=sum_dims)
@@ -54,14 +72,16 @@ def dice_coefficient(loader, model, loss_fn=None, num_classes=3, device="cuda"):
             total_dice += dice_batch
             n_batches += 1
 
+            # Free up memory
+            del imgs, masks, logits, preds, masks_onehot, preds_onehot
+            torch.cuda.empty_cache()
+
     avg_dice = total_dice / max(1, n_batches)
     avg_loss = total_loss / max(1, n_batches) if loss_fn is not None else None
 
-    # print(f"Average Dice over {n_batches} batches: {avg_dice:.4f}")
-    if avg_loss is not None:
-        print(f"Average Validation Loss: {avg_loss:.4f}")
-
     model.train()
+    gc.collect()
+    torch.cuda.empty_cache()
 
     return avg_dice, avg_loss
 
@@ -76,7 +96,7 @@ class DiceLoss(nn.Module):
         super(DiceLoss, self).__init__()
         self.num_classes = num_classes
         self.smooth = smooth
-        self.class_weights = torch.tensor([0.05, 0.475, 0.475], device='cuda')  # move to init
+        self.class_weights = torch.tensor([0.2, 0.4, 0.4], device='cuda')  # move to init
 
     def forward(self, logits, targets):
         if logits.ndim == 5 :
@@ -100,7 +120,6 @@ class DiceLoss(nn.Module):
         dice = (2 * intersection + self.smooth) / (union + self.smooth)
 
         dice = (1 - dice) * self.class_weights
-        dice = (1 - dice) 
         loss = dice.mean()
         return loss
 
@@ -108,7 +127,7 @@ class DiceLoss(nn.Module):
 class FocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2, reduction="mean"):
         super(FocalLoss, self).__init__()
-        self.alpha = alpha
+        self.alpha = 1
         self.gamma = gamma
         self.reduction = reduction
 
@@ -118,6 +137,8 @@ class FocalLoss(nn.Module):
 
         ce_loss = F.cross_entropy(logits, targets, reduction="none")  # [B, H, W, D]
         pt = torch.exp(-ce_loss)
+
+        # alpha = self.alpha.view(1, -1, 1, 1, 1)  # shape (1, 3, 1, 1, 1)
         focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
 
         if self.reduction == "mean":
@@ -132,7 +153,7 @@ class CombinedLoss(nn.Module):
         super().__init__()
         self.dice = DiceLoss(num_classes)
         self.weights = torch.tensor([0.2, 0.4, 0.4], device='cuda')
-        self.alpha = torch.tensor([0.05, 0.475, 0.475], device='cuda')
+        self.alpha = torch.tensor([0.2, 0.4, 0.4], device='cuda')
 
         self.ce = FocalLoss(alpha=self.alpha, gamma=2, reduction="mean")
         # self.ce = nn.CrossEntropyLoss(weight=self.weights, reduction="mean")

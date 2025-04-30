@@ -24,8 +24,8 @@ from metric import DiceLoss, CombinedLoss
 def main():
     learning_rate = 1e-4
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    batch_size = 8
-    num_epochs = 10
+    batch_size = 32
+    num_epochs = 20
     train_set_size = 0.8
     image_height = 512
     image_width = 512
@@ -53,7 +53,12 @@ def main():
     weights = torch.tensor([0.1, 1.0, 1.0], device='cuda') #For class imbalance
     loss_fn =  CombinedLoss(num_classes=3)
     # loss_fn = nn.CrossEntropyLoss(weight=weights)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+                                                      mode='min',
+                                                      factor=0.5,
+                                                      patience=3,
+                                                      verbose=True) 
     
     print("-"*20,"Loading Data", "-" * 20)
     train_loader, val_loader = data_loader2D(
@@ -74,7 +79,7 @@ def main():
 
     print("-"*20,"Training Data", "-" * 20)
 
-    trainer = Trainer(batch_size, learning_rate, num_epochs, model, (train_loader, val_loader), loss_fn, optimizer, scaler)
+    trainer = Trainer(batch_size, learning_rate, num_epochs, model, (train_loader, val_loader), loss_fn, optimizer, scaler, scheduler)
     trainer.train()
 
 #Plots and accuracy
