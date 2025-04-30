@@ -1,25 +1,6 @@
-2025-04-24 19:37:11.296877: I tensorflow/core/util/port.cc:113] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-04-24 19:37:11.319986: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
-To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2025-04-24 19:37:11.692984: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+Using Python at: /cluster/home/mariulie/.conda/envs/miniProj/bin/python
+Python 3.12.9
+Using 3 GPUs!
+mumber of GPUs: 3
 -------------------- Loading Data --------------------
-Full dataset length: 150
--------------------- Training Data --------------------
-Epoch 1/10
-torch.Size([4, 1, 640, 640])
-Traceback (most recent call last):
-  File "/home/mariulie/Documents/TDT4265/MiniProject2D/main.py", line 75, in <module>
-    main()
-  File "/home/mariulie/Documents/TDT4265/MiniProject2D/main.py", line 70, in main
-    trainer.train()
-  File "/home/mariulie/Documents/TDT4265/MiniProject2D/train.py", line 88, in train
-    loss = self.train_batch(train_img, train_mask)
-  File "/home/mariulie/Documents/TDT4265/MiniProject2D/train.py", line 63, in train_batch
-    predictions = self.model(img_batch)
-  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1553, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-  File "/usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py", line 1562, in _call_impl
-    return forward_call(*args, **kwargs)
-  File "/home/mariulie/Documents/TDT4265/MiniProject2D/model.py", line 71, in forward
-    x = torch.cat((skip_connection, x), dim=1)
-torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 800.00 MiB. GPU 0 has a total capacity of 23.53 GiB of which 559.56 MiB is free. Process 67699 has 3.77 GiB memory in use. Process 312198 has 11.77 GiB memory in use. Including non-PyTorch memory, this process has 6.86 GiB memory in use. Of the allocated memory 6.15 GiB is allocated by PyTorch, and 271.60 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Full dataset length: 0

@@ -3,7 +3,7 @@
 #SBATCH --job-name=MiniProject
 #SBATCH --time=0-08:00:00
 #SBATCH --partition=GPUQ
-#SBATCH --gres=gpu:a100:8
+#SBATCH --gres=gpu:a100:4
 #SBATCH --mem=32G
 #SBATCH --nodes=1
 #SBATCH --output=output.txt
@@ -23,5 +23,5 @@ echo "Using Python at: $(which python)"
 python --version
 
 # Run the script
-python /cluster/home/mariulie/Documents/TDT4265/MP3D/main.py
+python /cluster/home/mariulie/Documents/TDT4265/3D/UNet-segmentation-MRI/main.py
 
