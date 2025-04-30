@@ -14,6 +14,8 @@ from monai.transforms import (
 )
 import argparse
 import os
+import numpy as np
+from monai.inferers import SlidingWindowInferer
 
 from config import base_path, CONFIG
 from utils import (
@@ -23,7 +25,8 @@ from utils import (
     save_predictions_as_img,
     mask_to_class,
     get_2d_augmentation,
-    get_3d_augmentation
+    get_3d_augmentation,
+    compute_class_frequencies,
 )
 from train import Trainer
 from model import UNET, UNET3D
@@ -31,7 +34,8 @@ from metric import DiceLoss, CombinedLoss
 
 
 
-def run_training(model_class, data_loader_fn, augmentation_fn, checkpoint_path=None):
+
+def run_training(model_class, data_loader_fn, augmentation_fn, inferer,  checkpoint_path=None):
     model = model_class(input_channels=CONFIG["input_channels"], output_channels=CONFIG["output_channels"],
                      feature_size=CONFIG["feature_sizes"])
 
@@ -56,12 +60,25 @@ def run_training(model_class, data_loader_fn, augmentation_fn, checkpoint_path=N
         batch_size=CONFIG["batch_size"],
         train_set_size=CONFIG["train_set_size"]
     )
+    print("Batch size:", train_loader.batch_size)
+
 
     print("-" * 20, "Training Data", "-" * 20)
+    # counts = compute_class_frequencies(train_loader, num_classes=3)
+    # print("Voxel counts:", counts)
+    # counts = [25582147,    83575,   548678] #Represenative sample size, took to long for whole dataset
+    #                                        #Should be repeted if crop_size, precentage of background, and batch size are changed
+    # counts = np.array(counts, dtype=np.float32) 
+    # inv = 1.0 / (counts + 1e-8)
+    # weights = inv / inv.sum()  # normalize
+    weights = CONFIG["weights"]  # background, GTVp, GTVn
 
-    loss_fn = CombinedLoss(num_classes=3)
+    print("Normalized class weights:", weights)
+    loss_fn = CombinedLoss(num_classes=3, class_weights=weights, dice_weight=0.7, ce_weight=0.3)
+
+
     optimizer = optim.Adam(model.parameters(), lr=CONFIG["learning_rate"], weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.2, patience=3)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.2, patience=3)
     steps = len(train_loader) * CONFIG["num_epochs"]
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -89,7 +106,7 @@ def run_training(model_class, data_loader_fn, augmentation_fn, checkpoint_path=N
         print(f"Learning rate manually reset to {CONFIG['learning_rate']}")
 
     trainer = Trainer(CONFIG["batch_size"], CONFIG["learning_rate"], CONFIG["num_epochs"],
-                      model, (train_loader, val_loader), loss_fn, optimizer, scaler, scheduler)
+                      model, (train_loader, val_loader), loss_fn, optimizer, scaler, scheduler, inferer)
     trainer.train()
 
 
@@ -106,6 +123,18 @@ if __name__ == '__main__':
     # img_paths, mask_paths = img_paths[0:5], mask_paths[0:5]
 
     if args.d2:
-        run_training(UNET, data_loader2D, get_2d_augmentation)
+        inferer = SlidingWindowInferer(
+            roi_size=(64, 64),
+            sw_batch_size=1,
+            overlap=0.5,
+            mode='gaussian'
+        )
+        run_training(UNET, data_loader2D, get_2d_augmentation, inferer)
     else:
-        run_training(UNET3D, data_loader3D, get_3d_augmentation,"checkpoints/checkpoint_epoch_10.pth" )
+        inferer = SlidingWindowInferer(
+                    roi_size=(64, 64, 32),
+                    sw_batch_size=1,
+                    overlap=0.5,
+                    mode='gaussian'
+                )
+        run_training(UNET3D, data_loader3D, get_3d_augmentation, inferer)

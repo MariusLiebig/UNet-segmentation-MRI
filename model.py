@@ -123,7 +123,7 @@ class UNET3D(UNETBase):
             output_channels=output_channels,
             feature_size=feature_size,
             conv=nn.Conv3d,
-            batchnorm=partial(nn.InstanceNorm3d, affine=True),
+            batchnorm=nn.BatchNorm3d,
             pool=nn.MaxPool3d,
             convtranspose=nn.ConvTranspose3d
         )

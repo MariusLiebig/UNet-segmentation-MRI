@@ -9,12 +9,13 @@ import os
 import json
 import gc
 from tqdm import tqdm
+from monai.inferers import SlidingWindowInferer
 
 from utils import(
     to_cuda,
     save_checkpoint,
     save_predictions_as_img,
-    save_predictions_as_img_3d
+    
 )
 from metric import (
     dice_coefficient,
@@ -55,6 +56,13 @@ class Trainer:
 
         )
 
+        self.inferer = SlidingWindowInferer(
+                                    roi_size=(64, 64, 32),     # patch size (z,y,x)
+                                    sw_batch_size=1,             # how many patches at once (can be >1 if memory allows)
+                                    overlap=0.5,                 # % overlap between patches
+                                    mode='gaussian'              # blending mode: 'constant', 'gaussian', etc.
+                                )
+
     def train_batch(self):
         """
             Train the model for one epoch.
@@ -75,7 +83,7 @@ class Trainer:
 
             # Faster training on GPU
             with autocast(device_type='cuda'): #Reduces floating point precision to 16 bits when its ok
-                predictions = self.model(img_batch)
+                predictions = self.inferer(inputs=img_batch, network=self.model)
                 if mask_batch.ndim == 4 and mask_batch.shape[1] == 1:
                     mask_batch = mask_batch.squeeze(1)
                 mask_batch = mask_batch.long()

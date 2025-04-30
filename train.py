@@ -12,6 +12,7 @@ from tqdm import tqdm
 import nibabel as nib
 import numpy as np
 import torch.nn.functional as F
+import signal
 
 
 
@@ -26,7 +27,7 @@ from metric import (
 
 class Trainer:
 
-    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 5):
+    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, scheduler, inferer, early_stop_count = 5):
         """
             Initialize our trainer class.
         """
@@ -35,7 +36,7 @@ class Trainer:
         self.epochs = epochs    
         self.loss_fn = loss_fn
         self.model = model
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=3)
+        self.scheduler =scheduler
         self.model = to_cuda(self.model)
         self.optimizer = optimizer
         self.dataloader_train, self.dataloader_val = dataloaders
@@ -56,9 +57,11 @@ class Trainer:
 
         self.train_history = dict(
             loss=collections.OrderedDict(),
-            accuracy=collections.OrderedDict()
+            accuracy=collections.OrderedDict(),
+            pred_counts=collections.OrderedDict(),
+            class_counts=collections.OrderedDict(),
         )
-
+        self.inferer = inferer
         self.best_val_loss = float('inf')
         self.epochs_since_improvement = 0
 
@@ -74,21 +77,19 @@ class Trainer:
         running_dice = 0
 
         num_batches = 0
+        class_counts = torch.zeros(3, dtype=torch.long)
+        pred_counts = torch.zeros(3, dtype=torch.long)  # <-- add this
+
 
         for img_batch, mask_batch in loop:
             img_batch, mask_batch = to_cuda(img_batch), to_cuda(mask_batch)
-
             # Comes when cropping around the tumor
-            if img_batch.ndim == 6:                       # [B, N, C, H, W, D]
-                B, N, C, H, W, D = img_batch.shape
-                img_batch = img_batch.view(B * N, C, H, W, D)
-                # mask_batch was [B, N, H, W, D] or [B, N, 1, H, W, D] depending on your code
-                # make sure it's [B, N, H, W, D] here:
-                mask_batch = mask_batch.squeeze(2) if mask_batch.ndim == 6 else mask_batch
-                mask_batch = mask_batch.view(B * N, H, W, D)
 
             with autocast(device_type='cuda'):
                 predictions = self.model(img_batch)
+                preds = predictions.argmax(dim=1)
+                pred_counts += torch.bincount(preds.flatten().cpu(), minlength=3)
+
 
                 if mask_batch.ndim == 4 and mask_batch.shape[1] == 1:#For 2D
                     mask_batch = mask_batch.squeeze(1)
@@ -98,26 +99,37 @@ class Trainer:
                     
                 mask_batch = mask_batch.long()
 
+                counts = torch.bincount(mask_batch.flatten().cpu(), minlength=3)
+                class_counts += counts
+
+
                 loss = self.loss_fn(predictions, mask_batch)
 
  
+
 
             self.optimizer.zero_grad(set_to_none=True)
             self.scaler.scale(loss).backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
+            self.scheduler.step()
+
 
 
             num_batches += 1
             running_loss += loss.item()
 
 #------------------------------- Dice accuracy -----------------------------------
-            dice_batch, _ = dice_coefficient([(img_batch, mask_batch)], self.model, num_classes=predictions.shape[1], device=img_batch.device)
+            dice_batch, _, _ = dice_coefficient([(img_batch, mask_batch)], self.model, inferer = self.inferer, num_classes=predictions.shape[1], device=img_batch.device)
             running_dice += dice_batch
 #--------------------------------------------------------------------------------
 
             loop.set_postfix(loss=loss.item())
+
+        print(f"Epoch class distribution: {class_counts.tolist()}")
+        print(f"Predicted label counts: {pred_counts.tolist()}")
+
 
         avg_loss = running_loss / num_batches
         avg_dice = running_dice / num_batches
@@ -128,25 +140,31 @@ class Trainer:
 
     
     def train(self):
+        signal.signal(signal.SIGUSR1, self.handle_usr1)
+
         os.makedirs("checkpoints", exist_ok=True)
         os.makedirs("saved_nifti", exist_ok=True)
         for epoch in range(self.epochs):
             self.global_step += 1
             print(f"Epoch {epoch + 1}/{self.epochs}") #Epoch plus 1 because of 0 indexing
 
-            avg_loss, avg_accuracy = self.train_batch()
-            print(f"Train accuracy: {avg_accuracy:.4f}")
+            avg_loss, avg_dice = self.train_batch()
+            print(f"Train Dice: {avg_dice:.4f}")
             print(f"Train loss: {avg_loss:.4f}")
-            self.train_history["accuracy"][self.global_step] = avg_accuracy
+            self.train_history["accuracy"][self.global_step] = avg_dice
             self.train_history["loss"][self.global_step] = avg_loss
+            val_dice, val_loss, dice_per_class = dice_coefficient(self.dataloader_val, self.model, inferer = self.inferer, num_classes=3, loss_fn=None)
+            print(f"Validation Dice: {val_dice:.4f}")
+            self.validation_history["accuracy"][self.global_step] = val_dice
 
-            val_acc, val_loss = dice_coefficient(self.dataloader_val, self.model, num_classes=3, loss_fn=None)
-            print(f"Validation accuracy: {val_acc:.4f}")
+            for i, d in enumerate(dice_per_class):
+                print(f"  Class {i} Dice: {d:.4f}")
+            self.train_history["dice_per_class"][self.global_step] = dice_per_class
+
             # print(f"Validation loss: {val_loss:.4f}")
             # self.validation_history["loss"][self.global_step] = val_loss
-            self.validation_history["accuracy"][self.global_step] = val_acc
+            self.validation_history["accuracy"][self.global_step] = val_dice
 
-            self.scheduler.step(val_acc)
             lr = self.optimizer.param_groups[0]['lr']
             print(f" LR reduced?  new lr = {lr:.2e}")
 
@@ -201,40 +219,9 @@ class Trainer:
             json.dump(self.validation_history, f)
         print("Training and validation history saved.")
 
-    def save_predictions_as_nifti(self, loader, folder="saved_nifti/", max_examples=30):
-        os.makedirs(folder, exist_ok=True)
-        self.model.eval()
-        saved = 0
-        with torch.no_grad():
-            for x, y in loader:
-                x = to_cuda(x)
-                logits = self.model(x)
-                preds = torch.softmax(logits, dim=1)
-                preds = preds.argmax(dim=1)  # [B, H, W]
+    
+    def handle_usr1(self, signum, frame):
+        print("Received SIGUSR1 — saving checkpoint.")
+        self.save_checkpoint("checkpoints/manual_checkpoint.pth")  # adapt as needed
 
-                # Move everything to CPU
-                preds = preds.cpu().numpy()
-                y = y.cpu().numpy()
-                x = x.cpu().numpy()
-
-                for i in range(preds.shape[0]):
-                    if saved >= max_examples:
-                        return
-
-                    # Save prediction
-                    pred_img = nib.Nifti1Image(preds[i].astype(np.uint8), affine=np.eye(4))
-                    nib.save(pred_img, f"{folder}/pred_{saved}.nii.gz")
-
-                    # Save ground truth
-                    gt_img = nib.Nifti1Image(y[i].astype(np.uint8), affine=np.eye(4))
-                    nib.save(gt_img, f"{folder}/gt_{saved}.nii.gz")
-
-                    # Save original input image
-                    img = x[i]
-                    if img.ndim == 3 and img.shape[0] == 1:
-                        img = img[0]  # (H, W) — remove channel dim if grayscale
-
-                    img = nib.Nifti1Image(img.astype(np.float32), affine=np.eye(4))
-                    nib.save(img, f"{folder}/img_{saved}.nii.gz")
-
-                    saved += 1
+    # Register the handler at the start of the script

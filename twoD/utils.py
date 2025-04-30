@@ -126,61 +126,6 @@ def save_predictions_as_img(
 
 
 
-def save_predictions_as_img_3d(
-    loader,
-    model,
-    folder="saved_images/",
-    device="cuda",
-    overlay: bool = False,
-    slice_axis: int = 2,  # Default: axial slices
-    save_every_nth_slice: int = 1,  # Save every slice, or every nth
-):
-    """
-    Save predictions and overlays for 3D volumes slice-by-slice.
-
-    Args:
-        loader: DataLoader yielding (images, masks), shape [B, C, D, H, W]
-        model: segmentation model
-        folder: directory to save image slices
-        device: "cuda" or "cpu"
-        overlay: if True, save blended overlay image
-        slice_axis: which axis to slice on (0=depth, 1=height, 2=width)
-        save_every_nth_slice: skip slices for brevity if desired
-    """
-    os.makedirs(folder, exist_ok=True)
-    model.eval()
-
-    with torch.no_grad():
-        for batch_idx, (imgs, masks) in enumerate(loader):
-            imgs = imgs.to(device)
-            preds = torch.sigmoid(model(imgs))
-            preds = (preds > 0.5).float().cpu().numpy()  # [B, 1, D, H, W]
-            imgs_np = imgs.cpu().numpy()
-            masks_np = masks.cpu().numpy()
-
-            for i in range(imgs_np.shape[0]):  # batch loop
-                idx = batch_idx * loader.batch_size + i
-                pred_vol = preds[i, 0]   # [D, H, W]
-                img_vol = imgs_np[i, 0]  # [D, H, W] or [C, D, H, W]
-                gt_vol = masks_np[i, 0]  # [D, H, W]
-
-                depth = pred_vol.shape[0]
-
-                for d in range(0, depth, save_every_nth_slice):
-                    pred_slice = (pred_vol[d] * 255).astype(np.uint8)
-                    gt_slice = (gt_vol[d] * 255).astype(np.uint8)
-                    img_slice = (img_vol[d] * 255).astype(np.uint8)
-
-                    Image.fromarray(pred_slice).save(f"{folder}/pred_{idx}_{d}.png")
-                    Image.fromarray(gt_slice).save(f"{folder}/gt_{idx}_{d}.png")
-
-                    if overlay:
-                        overlay_img = np.stack([img_slice] * 3, axis=-1)  # grayscale to RGB
-                        overlay_img[pred_slice > 0] = [255, 0, 0]  # red mask
-                        blended = (0.6 * overlay_img + 0.4 * np.stack([img_slice]*3, axis=-1)).astype(np.uint8)
-                        Image.fromarray(blended).save(f"{folder}/overlay_{idx}_{d}.png")
-
-    model.train()
 
 def mask_to_class(x, **kwargs):
     x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2

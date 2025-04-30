@@ -12,6 +12,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import random
 
+from data.augmentationFunctions import crop_resize_multiple, mask_to_class
 #TODO: Add caching, data augmentation, and other preprocessing steps
 
 
@@ -31,7 +32,7 @@ class BaseDataset(Dataset):
         img = self.loader(path)
         img = img.astype(np.float32)
         max_val = np.max(img)
-        img /= max_val if max_val > 0 else 1
+        # img /= max_val if max_val > 0 else 1
         return img
     
 
@@ -39,7 +40,7 @@ class BaseDataset(Dataset):
     
 
 class MedImgDataset3D(BaseDataset):
-    def __init__(self, image_paths, mask_paths, augmentation, n_crops = 4):
+    def __init__(self, image_paths, mask_paths, augmentation, n_crops = 8):
         super().__init__(image_paths, mask_paths, augmentation)
         self.current_volume_idx = -1
         self.current_crops = []
@@ -92,7 +93,7 @@ class MedImgDataset3D(BaseDataset):
         std = 1.0
 
         # Get all crops (mixed tumor and background)
-        crops = crop_resize_multiple(image, mask, output_shape=(64, 64, 32), background_fraction=0.2, num_crops=self.n_crops)
+        crops = crop_resize_multiple(image, mask, output_shape=(64, 64, 32), background_fraction=0.1, num_crops=self.n_crops)
 
         if not crops:
             raise ValueError("No valid crops generated.")
@@ -194,156 +195,6 @@ class MedImgDataset2D(BaseDataset):
 
 
 
-
-
-import numpy as np
-import random
-
-def crop_resize(image: np.ndarray,
-                mask: np.ndarray,
-                output_shape=(32, 32, 32),
-                background_prob=0.2):
-    """
-    Crop a 3D image and mask centered on tumor (non-zero region),
-    or randomly sample background with `background_prob`.
-    Output shape is fixed as specified (H, W, D).
-    """
-    image = np.squeeze(image)  # (H, W, D)
-    mask = np.squeeze(mask)
-    assert image.shape == mask.shape, "Image and mask must have the same shape"
-
-    H, W, D = image.shape
-    out_H, out_W, out_D = output_shape
-
-    # Decide whether to do tumor-centered crop or background crop
-    force_background = random.random() < background_prob or np.sum(mask) == 0
-
-    if not force_background:
-        # --- Tumor-centered crop ---
-        coords = np.array(np.nonzero(mask))  # shape (3, N)
-        y0, x0, z0 = coords.min(axis=1)
-        y1, x1, z1 = coords.max(axis=1)
-
-        cy = (y0 + y1) // 2
-        cx = (x0 + x1) // 2
-        cz = (z0 + z1) // 2
-    else:
-        # --- Random background crop ---
-        cy = random.randint(out_H // 2, H - out_H // 2)
-        cx = random.randint(out_W // 2, W - out_W // 2)
-        cz = random.randint(out_D // 2, D - out_D // 2)
-
-    # Compute crop bounds
-    y_start = max(cy - out_H // 2, 0)
-    x_start = max(cx - out_W // 2, 0)
-    z_start = max(cz - out_D // 2, 0)
-
-    y_end = y_start + out_H
-    x_end = x_start + out_W
-    z_end = z_start + out_D
-
-    # Clamp to valid range
-    if y_end > H:
-        y_end = H
-        y_start = H - out_H
-    if x_end > W:
-        x_end = W
-        x_start = W - out_W
-    if z_end > D:
-        z_end = D
-        z_start = D - out_D
-
-    # Final crop
-    img_crop = image[y_start:y_end, x_start:x_end, z_start:z_end]
-    msk_crop = mask[y_start:y_end, x_start:x_end, z_start:z_end]
-
-    return img_crop, msk_crop
-
-def mask_to_class(x, **kwargs):
-    x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
-    return x_new
-
-
-def crop_resize_multiple(image: np.ndarray,
-                         mask: np.ndarray,
-                         output_shape=(32, 32, 32),
-                         num_crops=4,
-                         background_fraction=0.2,
-                         margin_ratio=0.25):
-    """
-    Returns a mix of tumor-containing and background-only crops.
-    - At least (1 - background_fraction) of crops will contain tumor
-    - output_shape: (H, W, D)
-    """
-    image = np.squeeze(image)
-    mask = np.squeeze(mask)
-    assert image.shape == mask.shape, "Image and mask must have the same shape"
-
-    H, W, D = image.shape
-    out_H, out_W, out_D = output_shape
-
-    coords = np.array(np.nonzero(mask))
-    if coords.shape[1] == 0:
-        raise ValueError("No tumor found in mask.")
-
-    y0, x0, z0 = coords.min(axis=1)
-    y1, x1, z1 = coords.max(axis=1)
-
-    # Define tumor region with margin
-    margin_y = int(out_H * margin_ratio)
-    margin_x = int(out_W * margin_ratio)
-    margin_z = int(out_D * margin_ratio)
-
-    y_range = (max(y0 - margin_y, out_H // 2), min(y1 + margin_y, H - out_H // 2))
-    x_range = (max(x0 - margin_x, out_W // 2), min(x1 + margin_x, W - out_W // 2))
-    z_range = (max(z0 - margin_z, out_D // 2), min(z1 + margin_z, D - out_D // 2))
-
-    crops = []
-    num_background = int(num_crops * background_fraction)
-    num_tumor = num_crops - num_background
-
-    def extract_crop(cy, cx, cz):
-        y_start = max(cy - out_H // 2, 0)
-        x_start = max(cx - out_W // 2, 0)
-        z_start = max(cz - out_D // 2, 0)
-
-        y_end = y_start + out_H
-        x_end = x_start + out_W
-        z_end = z_start + out_D
-
-        if y_end > H or x_end > W or z_end > D:
-            return None, None
-
-        img_crop = image[y_start:y_end, x_start:x_end, z_start:z_end]
-        msk_crop = mask[y_start:y_end, x_start:x_end, z_start:z_end]
-        return img_crop, msk_crop
-
-    # --- Tumor crops ---
-    attempts = 0
-    while len(crops) < num_tumor and attempts < 100:
-        cy = random.randint(*y_range)
-        cx = random.randint(*x_range)
-        cz = random.randint(*z_range)
-        img_crop, msk_crop = extract_crop(cy, cx, cz)
-        if img_crop is not None and np.any(msk_crop):
-            crops.append((img_crop, msk_crop))
-        attempts += 1
-
-    # --- Background crops ---
-    attempts = 0
-    while len(crops) < num_crops and attempts < 100:
-        cy = random.randint(out_H // 2, H - out_H // 2)
-        cx = random.randint(out_W // 2, W - out_W // 2)
-        cz = random.randint(out_D // 2, D - out_D // 2)
-        img_crop, msk_crop = extract_crop(cy, cx, cz)
-        if img_crop is not None and not np.any(msk_crop):
-            crops.append((img_crop, msk_crop))
-        attempts += 1
-
-    if len(crops) < num_crops:
-        print(f"Warning: only {len(crops)} valid crops were generated.")
-
-    return crops
 
 
 

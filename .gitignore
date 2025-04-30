@@ -4,7 +4,7 @@ __pycache__/
 
 # Ignore checkpoints and model weights
 *.pth
-checkpoints/
+# checkpoints/
 
 # Ignore Nifti files (medical images)
 *.nii

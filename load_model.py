@@ -116,7 +116,6 @@ def predict_and_save_volume(model, input_path, save_path, device="cuda"):
     # Remove batch dimension
     preds = preds.squeeze(0).cpu().numpy()  # (H, W, D)
 
-    print(f"Predicted volume shape: {preds.shape}")
 
     # Save as NIfTI
     pred_img = nib.Nifti1Image(preds.astype(np.uint8), affine=affine, header=header)

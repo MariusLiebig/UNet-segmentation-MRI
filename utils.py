@@ -67,8 +67,8 @@ def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
     # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
     return train_loader, val_loader
 
 def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
@@ -100,8 +100,8 @@ def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     print(f"Training set size: {len(train_dataset)}, Validation set size: {len(val_dataset)}")
 
     # 3. Create DataLoaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
 
     return train_loader, val_loader
 
@@ -138,8 +138,9 @@ def get_3d_augmentation():
     return Compose([
         # LoadImaged(keys=["image", "mask"]),
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-
-        RandBiasFieldd(keys=["image"], prob=0.3),
+        # Orientationd(keys=["image", "label"], axcodes="RAS"),
+        # Spacingd(keys=["image", "label"], pixdim=(0.5, 0.5, 2.0), mode=("bilinear", "nearest")),
+        # RandBiasFieldd(keys=["image"], prob=0.3),   
         RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
         RandGaussianNoised(keys=["image"], prob=0.3),
         # RandFlipd(keys=["image", "mask"], spatial_axis=[0], prob=0.5),
@@ -154,6 +155,18 @@ def get_3d_augmentation():
 
 
 
+def compute_class_frequencies(train_loader, num_classes=3):
+    voxel_counts = np.zeros(num_classes, dtype=np.int64)
+    print(f"Length of train_loader: {len(train_loader)}")
+    for _, masks in train_loader:
+        # Ensure masks are on CPU and in integer format
+        masks = masks.long().cpu()
+
+        for cls in range(num_classes):
+            voxel_counts[cls] += torch.sum(masks == cls).item()
+        print(f"Voxel counts for class {cls}: {voxel_counts}")
+
+    return voxel_counts
 
 
 
