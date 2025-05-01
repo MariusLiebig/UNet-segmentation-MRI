@@ -66,7 +66,7 @@ class MedImgDataset3D(BaseDataset):
 
 class MedImgDataset2D(BaseDataset):
     def __init__(self, image_paths, mask_paths, augmentation = None, slice_axis=2, slice_idx=10, get_all_slices=False, num_slices = 50,
-                 keep_background_fraction=0.05):
+                 keep_background_fraction=0.05, test = False):
         super().__init__(image_paths, mask_paths)
         self.slice_axis = slice_axis
         self.slice_idx = slice_idx
@@ -85,7 +85,7 @@ class MedImgDataset2D(BaseDataset):
         self.img_slice = [self.get_slice(self.img_volumes[self.vol_idx[i]], self.slice_idx[i]) for i in range(len(self.valid_indices))]
         self.mask_slice = [self.get_slice(self.mask_volumes[self.vol_idx[i]], self.slice_idx[i]) for i in range(len(self.valid_indices))]
 
-
+        self.test = test
 
 
 
@@ -118,7 +118,7 @@ class MedImgDataset2D(BaseDataset):
 
         # img = self.load_nii(self.image_paths[vol_idx])
         # mask = self.load_nii(self.mask_paths[vol_idx])
-
+        print(idx)
 
 
         if self.augmentation is not None:
@@ -127,8 +127,10 @@ class MedImgDataset2D(BaseDataset):
             # Fix mask shape if necessary
             if mask_slice.ndim == 3 and mask_slice.shape[-1] == 1:
                 mask_slice = np.transpose(mask_slice, (2, 0, 1))
-
-        return img_slice, mask_slice
+        if self.test:
+            return img_slice, mask_slice, idx
+        else:
+            return img_slice, mask_slice
 
     def get_slice(self, volume, slice_idx):
         slice_2d = np.take(volume, slice_idx, axis=self.slice_axis)

@@ -22,13 +22,14 @@ from metric import DiceLoss, CombinedLoss
 
 
 def main():
-    learning_rate = 1e-6
+    learning_rate = 1e-5
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    batch_size = 32
-    num_epochs = 10
+    batch_size = 16
+    num_epochs = 30
     train_set_size = 0.8
     image_height = 512
     image_width = 512
+    keep_background_fraction = 0.3
 
     augmentation = A.Compose(
         [
@@ -62,11 +63,13 @@ def main():
         augmentation = augmentation,
         batch_size = batch_size,
         train_set_size = train_set_size,
+        keep_background_fraction = keep_background_fraction,   
         )
 
     # Load model?????
     # if LOAD_MODEL:
-    checkpoint_path = "checkpoints/checkpoint_epoch_10.pth"
+    checkpoint_path = "checkpoints/checkpoint_epoch_13.pth"
+    # checkpoint_path = None
     if checkpoint_path is not None:
         checkpoint = torch.load(checkpoint_path, map_location="cuda",weights_only=True)
         model.load_state_dict(checkpoint['model_state_dict'])

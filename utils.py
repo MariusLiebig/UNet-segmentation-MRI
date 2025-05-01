@@ -20,9 +20,9 @@ def to_cuda(tensor):
         return tensor.cuda()
     return tensor
 
-def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
+def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
     #Split into train and validation set via pathdir
-    full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, get_all_slices=True)
+    full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, get_all_slices=True, keep_background_fraction=keep_background_fraction, test = test)
     print(f"Full dataset length: {len(full_dataset)}")
 
     train_size = int(train_set_size * len(full_dataset))
@@ -32,8 +32,11 @@ def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
     # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+
+    
     return train_loader, val_loader
 
 def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
@@ -51,6 +54,26 @@ def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_s
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=True)
     return train_loader, val_loader
 
+def data_loader2D_test(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
+    #Split into train and validation set via pathdir
+    full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, get_all_slices=True, keep_background_fraction=keep_background_fraction, test = test)
+    print(f"Full dataset: {len(full_dataset)}")
+
+
+    train_size = int(train_set_size * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+    print(f"Train dataset length: {len(train_dataset)}, Val dataset length: {len(val_dataset)}")
+    # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    
+    return train_loader, val_loader
+
+
+
 def load_paths():
 
     img_pattern = os.path.join(base_path,'**/*/preRT/*_T2.nii.gz')
@@ -60,6 +83,8 @@ def load_paths():
     mask_paths = glob.glob(mask_pattern, recursive=True)
 
     return image_paths, mask_paths
+
+
 
 
 def save_checkpoint(state, filename="my_checkpoint.pth.tar"):

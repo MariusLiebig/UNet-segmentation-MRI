@@ -84,7 +84,7 @@ class DiceLoss(nn.Module):
         targets_one_hot = F.one_hot(targets, num_classes=C).permute(0, 3, 1, 2).float()
 
         # Apply softmax
-        probs = F.softmax(logits, dim=1)
+        probs = F.softmax(logits, dim=1).clamp(min=1e-6, max=1 - 1e-6)
 
         if probs.shape != targets_one_hot.shape:
             raise ValueError(f"Shape mismatch: probs {probs.shape} vs targets_one_hot {targets_one_hot.shape}")
