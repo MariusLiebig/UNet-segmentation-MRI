@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from utils import to_cuda
 
-def dice_coefficient(loader, model, num_classes=3, device="cuda"):
+def dice_coefficient(loader, model, loss_fn = None, num_classes=3, device="cuda"):
     """
     Computes average Dice score over a DataLoader for multi-class segmentation.
 
@@ -20,6 +20,7 @@ def dice_coefficient(loader, model, num_classes=3, device="cuda"):
     model.eval()
     total_dice = 0.0
     n_batches = 0
+    total_loss = 0.0
     eps = 1e-6
 
     with torch.no_grad():
@@ -54,10 +55,15 @@ def dice_coefficient(loader, model, num_classes=3, device="cuda"):
             total_dice += dice_batch
             n_batches += 1
 
+            if loss_fn is not None:
+                loss = loss_fn(logits, masks)
+                total_loss += loss.item()
+
     avg_dice = total_dice / max(1, n_batches)
+    avg_loss = total_loss / max(1, n_batches) if loss_fn is not None else None
     print(f"Average Dice over {n_batches} batches: {avg_dice:.4f}")
     model.train()
-    return avg_dice
+    return avg_dice, avg_loss
 
 
 

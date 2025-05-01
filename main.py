@@ -66,7 +66,7 @@ def main():
 
     # Load model?????
     # if LOAD_MODEL:
-    checkpoint_path = "checkpoints/checkpoint_epoch_3.pth"
+    checkpoint_path = "checkpoints/checkpoint_epoch_10.pth"
     if checkpoint_path is not None:
         checkpoint = torch.load(checkpoint_path, map_location="cuda",weights_only=True)
         model.load_state_dict(checkpoint['model_state_dict'])

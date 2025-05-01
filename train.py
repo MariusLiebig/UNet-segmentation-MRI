@@ -9,6 +9,9 @@ import os
 import json
 import gc
 from tqdm import tqdm
+import heapq
+import os
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from utils import(
     to_cuda,
@@ -35,6 +38,13 @@ class Trainer:
         self.optimizer = optimizer
         self.dataloader_train, self.dataloader_val = dataloaders
         self.scaler = scaler
+        self.scheduler = ReduceLROnPlateau(
+            optimizer=self.optimizer,
+            mode='min',               # minimize val_loss
+            factor=0.5,               # reduce LR by half
+            patience=3,               # wait for 3 epochs with no improvement
+            verbose=True              # print when LR is reduced
+        )
 
         self.best_loss = float("inf")
         self.num_steps_per_val = len(self.dataloader_train) // 10
@@ -51,8 +61,10 @@ class Trainer:
         self.train_history = dict(
             loss=collections.OrderedDict(),
             accuracy=collections.OrderedDict()
-
         )
+
+        self.best_checkpoints = []  # list of tuples: (val_accuracy, checkpoint_path)
+        self.max_saved_checkpoints = 3
 
     def train_batch(self):
         """
@@ -103,12 +115,23 @@ class Trainer:
             intermidiate_time = time.time()
             avg_loss = self.train_batch()
             print(f"Train loss: {avg_loss:.4f}")
-            dice_coefficient(self.dataloader_val, self.model)
+            self.train_history["loss"][epoch] = avg_loss
+
+
+            avg_dice, avg_loss = dice_coefficient(self.dataloader_val, self.model, loss_fn=self.loss_fn)
+            print(f"Validation loss: {avg_loss:.4f}")
+            print(f"Validation accuracy: {avg_dice:.4f}")
+            self.validation_history["loss"][epoch] = avg_loss
+            self.validation_history["accuracy"][epoch] = avg_dice
+
+
             save_predictions_as_img(self.dataloader_train, self.model, epoch, folder="saved_images/")
             # if epoch < 4 or (epoch + 1) % 5 == 0:
-            self.save_checkpoint(epoch + 1)
-        
+            self.save_checkpoint(epoch, avg_dice)
             self.save_training_history()
+
+
+            self.scheduler.step(avg_loss) #ReduceLROnPlateau
     #Putting in UTILS?
 
     
@@ -127,7 +150,9 @@ class Trainer:
             print("Early stop criteria met")
             return True
         return False
-    def save_checkpoint(self, epoch):
+
+    def save_checkpoint(self, epoch, val_accuracy):
+        save_path = f"checkpoints/checkpoint_epoch_{epoch}.pth"
         save_dict = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -136,9 +161,24 @@ class Trainer:
             'train_history': self.train_history,
             'validation_history': self.validation_history,
             'time': time.time() - self.start_time,
+            'val_accuracy': val_accuracy
         }
-        torch.save(save_dict, f"checkpoints/checkpoint_epoch_{epoch}.pth")
-        print(f"Checkpoint saved at epoch {epoch}.")
+
+        # Always save current checkpoint
+        torch.save(save_dict, save_path)
+        print(f"Checkpoint saved at epoch {epoch} with val_acc={val_accuracy:.4f}.")
+
+        # Store new entry and keep top 3 by accuracy
+        self.best_checkpoints.append((val_accuracy, save_path))
+        self.best_checkpoints.sort(reverse=True, key=lambda x: x[0])
+
+        if len(self.best_checkpoints) > self.max_saved_checkpoints:
+            # Remove worst one
+            _, to_remove = self.best_checkpoints.pop()
+            if os.path.exists(to_remove):
+                os.remove(to_remove)
+                print(f"Removed old checkpoint: {to_remove}")
+
 
 
     def save_training_history(self):
