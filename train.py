@@ -25,7 +25,7 @@ from metric import (
 
 class Trainer:
 
-    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 5):
+    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 1):
         """
             Initialize our trainer class.
         """
@@ -55,16 +55,18 @@ class Trainer:
 
         self.validation_history = dict(
             loss=collections.OrderedDict(),
-            accuracy=collections.OrderedDict()
+            accuracy=collections.OrderedDict(),
+            dice_per_class=collections.OrderedDict()
+
         )
 
         self.train_history = dict(
             loss=collections.OrderedDict(),
-            accuracy=collections.OrderedDict()
+            accuracy=collections.OrderedDict(),
         )
 
         self.best_checkpoints = []  # list of tuples: (val_accuracy, checkpoint_path)
-        self.max_saved_checkpoints = 3
+        self.max_saved_checkpoints = 1
 
     def train_batch(self):
         """
@@ -118,41 +120,57 @@ class Trainer:
             self.train_history["loss"][epoch] = avg_loss
 
 
-            avg_dice, avg_loss = dice_coefficient(self.dataloader_val, self.model, loss_fn=self.loss_fn)
+            avg_dice, avg_loss, dice_per_class = dice_coefficient(self.dataloader_val, self.model, loss_fn=self.loss_fn)
             print(f"Validation loss: {avg_loss:.4f}")
             print(f"Validation accuracy: {avg_dice:.4f}")
+            print(f"Dice per class: {dice_per_class}")
             self.validation_history["loss"][epoch] = avg_loss
             self.validation_history["accuracy"][epoch] = avg_dice
+            self.validation_history["dice_per_class"][epoch] = dice_per_class
+
 
 
             save_predictions_as_img(self.dataloader_train, self.model, epoch, folder="saved_images/")
             # if epoch < 4 or (epoch + 1) % 5 == 0:
             self.save_checkpoint(epoch, avg_dice)
-            self.save_training_history()
 
 
             self.scheduler.step(avg_loss) #ReduceLROnPlateau
+
+            
+            lr = self.optimizer.param_groups[0]['lr']
+            print(f" LR reduced?  new lr = {lr:.2e}")
+
+            if self.early_stop():
+                break
+        self.save_training_history()
+        
     #Putting in UTILS?
 
     
     def early_stop(self):
         """
-            Checks if validation loss doesn't improve over early_stop_count epochs.
+        Check if validation loss has not improved in the last `early_stop_count` epochs.
         """
-        # Check if we have more than early_stop_count elements in our validation_loss list.
         val_loss = self.validation_history["loss"]
-        if len(val_loss) < self.early_stop_count:
+        
+        # Not enough epochs to consider early stopping
+        if len(val_loss) < self.early_stop_count + 1:
             return False
-        # We only care about the last [early_stop_count] losses.
-        relevant_loss = list(val_loss.values())[-self.early_stop_count:]
-        first_loss = relevant_loss[0]
-        if first_loss == min(relevant_loss):
-            print("Early stop criteria met")
+
+        # Get the last N + 1 losses
+        relevant_losses = list(val_loss.values())[-(self.early_stop_count + 1):]
+        print(f"Relevant losses for early stopping: {relevant_losses}")
+        best_loss = min(relevant_losses[:-1])  # best before last
+
+        if relevant_losses[-1] >= best_loss:
+            print("Early stopping triggered.")
             return True
         return False
 
+
     def save_checkpoint(self, epoch, val_accuracy):
-        save_path = f"checkpoints/checkpoint_epoch_{epoch}.pth"
+        save_path = f"checkpoints/checkpoint.pth"
         save_dict = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -177,7 +195,7 @@ class Trainer:
             _, to_remove = self.best_checkpoints.pop()
             if os.path.exists(to_remove):
                 os.remove(to_remove)
-                print(f"Removed old checkpoint: {to_remove}")
+                print(f"Removed old checkpoint")
 
 
 
@@ -188,4 +206,18 @@ class Trainer:
         with open("checkpoints/validation_history.json", "w") as f:
             json.dump(self.validation_history, f)
         print("Training and validation history saved.")
+
+    def load_checkpoint(self, path, learning_rate=None):
+        checkpoint = torch.load(path, map_location="cuda")
+
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        self.validation_history = checkpoint.get('validation_history', {})
+        self.train_history = checkpoint.get('train_history', {})
+        self.global_step = checkpoint.get('epoch', 0)
+
+        if learning_rate is not None:
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = learning_rate
 

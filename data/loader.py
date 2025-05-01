@@ -56,7 +56,6 @@ class MedImgDataset3D(BaseDataset):
         img, mask = self.apply_augmentations(img, mask)
 
         img = self.pad_volume(img)
-        print(f"Image shape: {img.shape}")
 
         return torch.tensor(img).float(), torch.tensor(mask).float()
 
@@ -118,7 +117,6 @@ class MedImgDataset2D(BaseDataset):
 
         # img = self.load_nii(self.image_paths[vol_idx])
         # mask = self.load_nii(self.mask_paths[vol_idx])
-        print(idx)
 
 
         if self.augmentation is not None:

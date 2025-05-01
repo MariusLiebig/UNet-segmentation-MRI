@@ -20,23 +20,52 @@ def to_cuda(tensor):
         return tensor.cuda()
     return tensor
 
-def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
-    #Split into train and validation set via pathdir
-    full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, get_all_slices=True, keep_background_fraction=keep_background_fraction, test = test)
-    print(f"Full dataset length: {len(full_dataset)}")
+# def data_loader2D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
+#     #Split into train and validation set via pathdir
+#     full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, get_all_slices=True, keep_background_fraction=keep_background_fraction, test = test)
+#     print(f"Full dataset length: {len(full_dataset)}")
 
-    train_size = int(train_set_size * len(full_dataset))
-    val_size = len(full_dataset) - train_size
+#     train_size = int(train_set_size * len(full_dataset))
+#     val_size = len(full_dataset) - train_size
 
-    # Randomly split dataset
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+#     # Randomly split dataset
+#     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-    # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+#     # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
+#     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+#     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
 
     
+#     return train_loader, val_loader
+
+
+def data_loader2D(image_paths, mask_paths, train_augmentation, val_augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
+    total_size = len(image_paths)
+    train_size = int(train_set_size * total_size)
+    val_size = total_size - train_size
+
+    # Random split of indices
+    indices = list(range(total_size))
+    np.random.shuffle(indices)
+
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:]
+
+    train_img_paths = [image_paths[i] for i in train_indices]
+    train_mask_paths = [mask_paths[i] for i in train_indices]
+    val_img_paths = [image_paths[i] for i in val_indices]
+    val_mask_paths = [mask_paths[i] for i in val_indices]
+
+    train_dataset = MedImgDataset2D(train_img_paths, train_mask_paths, augmentation=train_augmentation, get_all_slices=True, keep_background_fraction=keep_background_fraction)
+    val_dataset = MedImgDataset2D(val_img_paths, val_mask_paths, augmentation=val_augmentation, get_all_slices=True, keep_background_fraction=1.0)
+
+    print(f"Training set size: {len(train_dataset)}, Validation set size: {len(val_dataset)}")
+
+    # 3. Create DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
+
     return train_loader, val_loader
 
 def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
@@ -103,7 +132,7 @@ def save_predictions_as_img(
     epoch, 
     folder="saved_images/",
     device="cuda",
-    max_examples= 5,
+    max_examples= 1,
 ):
     os.makedirs(folder, exist_ok=True)
     model.eval()
@@ -116,12 +145,10 @@ def save_predictions_as_img(
             logits = model(x)
             probs = F.softmax(logits, dim=1)    # [B, 3, H, W]
             print("Softmax probs stats:")
-            print(f"Min: {probs.min().item():.4f}, Max: {probs.max().item():.4f}, Mean: {probs.mean().item():.4f}")
 
             # Optionally, print unique probabilities for first pixel (example)
             print("First pixel probs:", probs[0, :, 0, 0])
             preds = probs.argmax(dim=1) 
-            print(preds.shape)
 
             # Move to CPU for saving
             preds = preds.cpu()

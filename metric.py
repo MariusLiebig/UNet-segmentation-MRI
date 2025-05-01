@@ -22,7 +22,8 @@ def dice_coefficient(loader, model, loss_fn = None, num_classes=3, device="cuda"
     n_batches = 0
     total_loss = 0.0
     eps = 1e-6
-
+    total_intersection = torch.zeros(num_classes, device=device)
+    total_cardinality = torch.zeros(num_classes, device=device)
     with torch.no_grad():
         for imgs, masks in loader:
             imgs = imgs.to(device)
@@ -59,15 +60,12 @@ def dice_coefficient(loader, model, loss_fn = None, num_classes=3, device="cuda"
                 loss = loss_fn(logits, masks)
                 total_loss += loss.item()
 
+    dice_per_class_avg = ((2. * total_intersection + eps) / (total_cardinality + eps)).tolist()
     avg_dice = total_dice / max(1, n_batches)
     avg_loss = total_loss / max(1, n_batches) if loss_fn is not None else None
-    print(f"Average Dice over {n_batches} batches: {avg_dice:.4f}")
+
     model.train()
-    return avg_dice, avg_loss
-
-
-
-
+    return avg_dice, avg_loss, dice_per_class_avg
 
 class DiceLoss(nn.Module):
     def __init__(self, num_classes, smooth=1e-6):
