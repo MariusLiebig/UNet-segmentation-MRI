@@ -23,9 +23,10 @@ from metric import (
     dice_coefficient,
     )
 
+
 class Trainer:
 
-    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 1):
+    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 3):
         """
             Initialize our trainer class.
         """
@@ -52,6 +53,7 @@ class Trainer:
         self.start_time = time.time()
 
         self.early_stop_count = early_stop_count 
+        self.patience_counter = 0
 
         self.validation_history = dict(
             loss=collections.OrderedDict(),
@@ -116,10 +118,12 @@ class Trainer:
             print(f"Epoch {epoch + 1}/{self.epochs}") #Epoch plus 1 because of 0 indexing
             intermidiate_time = time.time()
             avg_loss = self.train_batch()
+            self.scheduler.step(avg_loss) #ReduceLROnPlateau
+            lr = self.optimizer.param_groups[0]['lr']
+            print(f" LR reduced?  new lr = {lr:.2e}")
+
             print(f"Train loss: {avg_loss:.4f}")
             self.train_history["loss"][epoch] = avg_loss
-
-
             avg_dice, avg_loss, dice_per_class = dice_coefficient(self.dataloader_val, self.model, loss_fn=self.loss_fn)
             print(f"Validation loss: {avg_loss:.4f}")
             print(f"Validation accuracy: {avg_dice:.4f}")
@@ -128,18 +132,9 @@ class Trainer:
             self.validation_history["accuracy"][epoch] = avg_dice
             self.validation_history["dice_per_class"][epoch] = dice_per_class
 
-
-
             save_predictions_as_img(self.dataloader_train, self.model, epoch, folder="saved_images/")
-            # if epoch < 4 or (epoch + 1) % 5 == 0:
             self.save_checkpoint(epoch, avg_dice)
 
-
-            self.scheduler.step(avg_loss) #ReduceLROnPlateau
-
-            
-            lr = self.optimizer.param_groups[0]['lr']
-            print(f" LR reduced?  new lr = {lr:.2e}")
 
             if self.early_stop():
                 break
@@ -163,39 +158,53 @@ class Trainer:
         print(f"Relevant losses for early stopping: {relevant_losses}")
         best_loss = min(relevant_losses[:-1])  # best before last
 
+        #Give it three epochs to improve
         if relevant_losses[-1] >= best_loss:
+            self.patience_counter += 1
+        else:
+            self.patience_counter = 0
+        print(f"Patience counter: {self.patience_counter}/{self.early_stop_count}")
+
+        if self.patience_counter > self.early_stop_count:
             print("Early stopping triggered.")
             return True
         return False
 
 
     def save_checkpoint(self, epoch, val_accuracy):
-        save_path = f"checkpoints/checkpoint.pth"
-        save_dict = {
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scaler_state_dict': self.scaler.state_dict(),
-            'train_history': self.train_history,
-            'validation_history': self.validation_history,
-            'time': time.time() - self.start_time,
-            'val_accuracy': val_accuracy
-        }
+        # Create checkpoints directory if it doesn't exist
+        os.makedirs("checkpoints", exist_ok=True)
 
-        # Always save current checkpoint
-        torch.save(save_dict, save_path)
-        print(f"Checkpoint saved at epoch {epoch} with val_acc={val_accuracy:.4f}.")
+        # Save only if current validation accuracy is the best so far
+        if not hasattr(self, "best_val_accuracy"):
+            self.best_val_accuracy = -float("inf")
 
-        # Store new entry and keep top 3 by accuracy
-        self.best_checkpoints.append((val_accuracy, save_path))
-        self.best_checkpoints.sort(reverse=True, key=lambda x: x[0])
+        if val_accuracy > self.best_val_accuracy:
+            self.best_val_accuracy = val_accuracy
 
-        if len(self.best_checkpoints) > self.max_saved_checkpoints:
-            # Remove worst one
-            _, to_remove = self.best_checkpoints.pop()
-            if os.path.exists(to_remove):
-                os.remove(to_remove)
-                print(f"Removed old checkpoint")
+            save_path = f"checkpoints/best_checkpoint_{epoch}.pth"
+            save_dict = {
+                'epoch': epoch,
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'scaler_state_dict': self.scaler.state_dict(),
+                'train_history': self.train_history,
+                'validation_history': self.validation_history,
+                'time': time.time() - self.start_time,
+                'val_accuracy': val_accuracy
+            }
+
+            torch.save(save_dict, save_path)
+            print(f"✅ Best checkpoint saved at epoch {epoch} with val_acc={val_accuracy:.4f}.")
+
+            # Optional: remove previous best checkpoint if stored
+            if hasattr(self, "last_best_checkpoint") and os.path.exists(self.last_best_checkpoint):
+                os.remove(self.last_best_checkpoint)
+                print(f"🗑️  Removed previous checkpoint: {self.last_best_checkpoint}")
+
+            self.last_best_checkpoint = save_path
+
+
 
 
 
@@ -206,6 +215,7 @@ class Trainer:
         with open("checkpoints/validation_history.json", "w") as f:
             json.dump(self.validation_history, f)
         print("Training and validation history saved.")
+        
 
     def load_checkpoint(self, path, learning_rate=None):
         checkpoint = torch.load(path, map_location="cuda")

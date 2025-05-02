@@ -8,7 +8,8 @@ from PIL import Image
 
 import os
 import gc
-
+import argparse
+import glob
 from config import base_path
 from utils import (
     data_loader2D,
@@ -22,6 +23,7 @@ from model import UNET, UNET3D
 from metric import DiceLoss, CombinedLoss
 
 
+
 def main():
     learning_rate = 5e-4
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -30,7 +32,13 @@ def main():
     train_set_size = 0.8
     image_height = 512
     image_width = 512
-    keep_background_fraction = 0.1 
+
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--keep_background_fraction", type=float, default=0.1)
+    args = parser.parse_args()
+
+    keep_background_fraction = args.keep_background_fraction
 
     augmentation = A.Compose(
         [
@@ -62,6 +70,13 @@ def main():
             ToTensorV2(),
         ])
 
+    checkpoint_path = glob.glob("checkpoints/best_checkpoint_*.pth")
+    
+     
+    if keep_background_fraction == 0.1:
+        checkpoint_path = None
+        learning_rate = 1e-4
+
     img_paths, mask_paths = load_paths()
     # img_paths, mask_paths = img_paths[0:2], mask_paths[0:2]
 
@@ -77,41 +92,37 @@ def main():
     
     print("-"*20,"Loading Data", "-" * 20)
 
- 
-    keep_background_fraction_list = [0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
-
-    for keep_background_fraction in keep_background_fraction_list:
 
 
-        train_loader, val_loader = data_loader2D(
-            img_paths,
-            mask_paths,
-            train_augmentation = augmentation,
-            val_augmentation = val_augmentation,
-            batch_size = batch_size,
-            train_set_size = train_set_size,
-            keep_background_fraction = keep_background_fraction,   
-            )
 
-        print(f"Training with keep_background_fraction = {keep_background_fraction}")
-        checkpoint_path = "checkpoints/checkpoint.pth"
+    train_loader, val_loader = data_loader2D(
+        img_paths,
+        mask_paths,
+        train_augmentation = augmentation,
+        val_augmentation = val_augmentation,
+        batch_size = batch_size,
+        train_set_size = train_set_size,
+        keep_background_fraction = keep_background_fraction,   
+        )
 
-        if keep_background_fraction == 0.1:
-            checkpoint_path = None
-            learning_rate = 1e-4
-        
-        print("loading checkpoint from", checkpoint_path)
+    print(f"Training with keep_background_fraction = {keep_background_fraction}")
 
-        print("-"*20,"Training Data", "-" * 20)
-        trainer = Trainer(batch_size, learning_rate, num_epochs, model, (train_loader, val_loader), loss_fn, optimizer, scaler, early_stop_count = 1)
-        if checkpoint_path is not None:
-            trainer.load_checkpoint(checkpoint_path, learning_rate=learning_rate)
-        trainer.train()
-        
-        
-        del train_loader, val_loader, trainer
-        torch.cuda.empty_cache()
-        gc.collect()
+
+    
+    print("loading checkpoint from", checkpoint_path)
+
+    print("-"*20,"Training Data", "-" * 20)
+    trainer = Trainer(batch_size, learning_rate, num_epochs, model, (train_loader, val_loader), loss_fn, optimizer, scaler, early_stop_count = 7)
+    if checkpoint_path is not None:
+        trainer.load_checkpoint(checkpoint_path, learning_rate=learning_rate)
+    trainer.train()
+    
+    
+    del train_loader, val_loader, trainer
+    torch.cuda.empty_cache()
+    gc.collect()
+    del model, optimizer, scaler
+
 
 
 
