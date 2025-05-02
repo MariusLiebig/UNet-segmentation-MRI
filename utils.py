@@ -22,6 +22,17 @@ def to_cuda(tensor):
 
 
 def data_loader2D(image_paths, mask_paths, train_augmentation, val_augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
+    """
+    Load 2D data for training and validation.
+    Args:
+        image_paths (list): List of paths to the images.
+        mask_paths (list): List of paths to the masks.
+        train_augmentation (callable): Augmentation function for training data.
+        val_augmentation (callable): Augmentation function for validation data.
+        batch_size (int): Batch size for DataLoader.
+        train_set_size (float): Proportion of data to use for training.
+        keep_background_fraction (float): Fraction of background pixels to keep in the dataset.
+    """
     total_size = len(image_paths)
     train_size = int(train_set_size * total_size)
     val_size = total_size - train_size
@@ -51,6 +62,16 @@ def data_loader2D(image_paths, mask_paths, train_augmentation, val_augmentation,
 
 
 def data_loader2D_test(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
+    """
+    Load 2D data for training and validation. Only used in testing because I need to reorder the slices
+    Args:
+        image_paths (list): List of paths to the images.
+        mask_paths (list): List of paths to the masks.
+        augmentation (callable): Augmentation function for training data.
+        batch_size (int): Batch size for DataLoader.
+        train_set_size (float): Proportion of data to use for training.
+        keep_background_fraction (float): Fraction of background pixels to keep in the dataset.
+    """
     #Split into train and validation set via pathdir
     full_dataset = MedImgDataset2D(image_paths, mask_paths, augmentation=augmentation, keep_background_fraction=keep_background_fraction, test = test)
     print(f"Full dataset: {len(full_dataset)}")
@@ -71,6 +92,9 @@ def data_loader2D_test(image_paths, mask_paths, augmentation, batch_size, train_
 
 
 def load_paths():
+    """
+    Load image and mask paths from the specified directory.
+    """
 
     img_pattern = os.path.join(base_path,'**/*/preRT/*_T2.nii.gz')
     mask_pattern = os.path.join(base_path,'**/*/preRT/*_mask.nii.gz')
@@ -81,18 +105,6 @@ def load_paths():
     return image_paths, mask_paths
 
 
-
-
-def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
-    print("=> Saving checkpoint")
-    torch.save(state, filename)
-
-def load_checkpoint(checkpoint, model):
-    print("=> Loading checkpoint")
-    model.load_state_dict(checkpoint["state_dict"])
-
-
-
 def save_predictions_as_img(
     loader,
     model,
@@ -101,6 +113,16 @@ def save_predictions_as_img(
     device="cuda",
     max_examples= 1,
 ):
+    """
+    Save predictions and ground truth images for a given epoch.
+    Args:
+        loader: DataLoader yielding (images, masks), shape [B, C, H, W]
+        model: segmentation model
+        epoch: current epoch number
+        folder: directory to save image slices
+        device: "cuda" or "cpu"
+        max_examples: maximum number of examples to save
+    """
     os.makedirs(folder, exist_ok=True)
     model.eval()
     saved = 0
@@ -145,64 +167,15 @@ def save_predictions_as_img(
     model.train()
 
 
-
-def save_predictions_as_img_3d(
-    loader,
-    model,
-    folder="saved_images/",
-    device="cuda",
-    overlay: bool = False,
-    slice_axis: int = 2,  # Default: axial slices
-    save_every_nth_slice: int = 1,  # Save every slice, or every nth
-):
-    """
-    Save predictions and overlays for 3D volumes slice-by-slice.
-
-    Args:
-        loader: DataLoader yielding (images, masks), shape [B, C, D, H, W]
-        model: segmentation model
-        folder: directory to save image slices
-        device: "cuda" or "cpu"
-        overlay: if True, save blended overlay image
-        slice_axis: which axis to slice on (0=depth, 1=height, 2=width)
-        save_every_nth_slice: skip slices for brevity if desired
-    """
-    os.makedirs(folder, exist_ok=True)
-    model.eval()
-
-    with torch.no_grad():
-        for batch_idx, (imgs, masks) in enumerate(loader):
-            imgs = imgs.to(device)
-            preds = torch.sigmoid(model(imgs))
-            preds = (preds > 0.5).float().cpu().numpy()  # [B, 1, D, H, W]
-            imgs_np = imgs.cpu().numpy()
-            masks_np = masks.cpu().numpy()
-
-            for i in range(imgs_np.shape[0]):  # batch loop
-                idx = batch_idx * loader.batch_size + i
-                pred_vol = preds[i, 0]   # [D, H, W]
-                img_vol = imgs_np[i, 0]  # [D, H, W] or [C, D, H, W]
-                gt_vol = masks_np[i, 0]  # [D, H, W]
-
-                depth = pred_vol.shape[0]
-
-                for d in range(0, depth, save_every_nth_slice):
-                    pred_slice = (pred_vol[d] * 255).astype(np.uint8)
-                    gt_slice = (gt_vol[d] * 255).astype(np.uint8)
-                    img_slice = (img_vol[d] * 255).astype(np.uint8)
-
-                    Image.fromarray(pred_slice).save(f"{folder}/pred_{idx}_{d}.png")
-                    Image.fromarray(gt_slice).save(f"{folder}/gt_{idx}_{d}.png")
-
-                    if overlay:
-                        overlay_img = np.stack([img_slice] * 3, axis=-1)  # grayscale to RGB
-                        overlay_img[pred_slice > 0] = [255, 0, 0]  # red mask
-                        blended = (0.6 * overlay_img + 0.4 * np.stack([img_slice]*3, axis=-1)).astype(np.uint8)
-                        Image.fromarray(blended).save(f"{folder}/overlay_{idx}_{d}.png")
-
-    model.train()
-
 def mask_to_class(x, **kwargs):
+    """
+    Convert mask values to class indices.
+    Args:
+        x: Input mask tensor.
+        **kwargs: Additional arguments (not used).
+    Returns:
+        x_new: Converted mask tensor with class indices.
+    """
     x_new = (x == 0.5).astype('uint8') + (x == 1).astype('uint8') * 2
 
     return x_new
@@ -210,45 +183,7 @@ def mask_to_class(x, **kwargs):
 
 
 
-# def path_show_image(img_path, every_nth=5, img_only=True, channel_first=True, simp_keys=True):
-#     data = LoadImage(image_only = img_only, ensure_channel_first = channel_first, simple_keys = simp_keys)(os.path.join(base_path, img_path))
-#     print(f"image data shape: {data.shape}")
-#     print(f"meta data: {data.meta.keys()}")
-#     fig, _ = monai.visualize.matshow3d(monai.transforms.Orientation("SPL")(data), every_n = every_nth)
-#     plt.show()
-
-# def show_image(image, every_nth=5):
-#     fig, _ = monai.visualize.matshow3d(monai.transforms.Orientation("SPL")(image), every_n = every_nth)
-#     plt.show()
-
-
-
-
 if __name__ == '__main__':
     img_paths, mask_paths = load_paths()
-    print(f"Image paths: {img_paths[0:5]}")
-    dataset = MedImgDataset3D(img_paths, mask_paths)
-
-    largest_height = 0
-    largest_width = 0
-    largest_breadth = 0
-    mask_largest_height = 0
-    mask_largest_width = 0
-    mask_largest_breadth = 0
-
-    for X, y in dataset:
-        largest_height = max(largest_height, X.shape[0])
-        largest_width = max(largest_width, X.shape[1])
-        largest_breadth = max(largest_breadth, X.shape[2])
-        mask_largest_height = max(mask_largest_height, y.shape[0])
-        mask_largest_width = max(mask_largest_width, y.shape[1])
-        mask_largest_breadth = max(mask_largest_breadth, y.shape[2])
-        print(f"  Image shape: {X.shape}")
-        print(f"  Mask shape: {y.shape}")
-        # show_image(X)
-    print(f"Largest height: {largest_height}")
-    print(f"Largest width: {largest_width}")
-    print(f"Largest breadth: {largest_breadth}")
-    print(f"Mask largest height: {mask_largest_height}")
-    print(f"Mask largest width: {mask_largest_width}")
-    print(f"Mask Largest breadth: {mask_largest_breadth}")
+    print(f"Image paths: {img_paths}")
+    print(f"Mask paths: {mask_paths}")
