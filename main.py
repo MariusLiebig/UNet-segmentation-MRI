@@ -85,7 +85,6 @@ def main():
     print("-" * 20, "Loading Data", "-" * 20)
     print(f"keep_background_fraction = {CONFIG['keep_background_fraction']}")
     img_paths, mask_paths = load_paths()
-    img_paths, mask_paths = img_paths[0:2], mask_paths[0:2]
     train_loader, val_loader = data_loader2D(
         img_paths,
         mask_paths,

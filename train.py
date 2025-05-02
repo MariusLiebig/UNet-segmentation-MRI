@@ -15,9 +15,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from utils import(
     to_cuda,
-    save_checkpoint,
     save_predictions_as_img,
-    save_predictions_as_img_3d
 )
 from metric import (
     dice_coefficient,
