@@ -1,23 +1,24 @@
 import os
 import numpy as np
 import tensorflow as tf
-# from tensorflow.keras.utils import Sequence
 import torch
 from torch.utils.data import Dataset
-# from MiniProject.utils import show_image
 import random
-
 import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from monai.transforms import LoadImage
 
-#TODO: Add caching, data augmentation, and other preprocessing steps
 
 
 
 class BaseDataset(Dataset):
+    """
+    Base dataset for loading 2D and 3D medical image and masks.
+    Args:
+        image_paths (list): List of paths to the images.
+        mask_paths (list): List of paths to the masks.
+        augmentation (callable, optional): Optional augmentation function to be applied on the images and masks.
+    """
     def __init__(self, image_paths, mask_paths, augmentation=None):
-        from monai.transforms import LoadImage
         self.image_paths = image_paths
         self.mask_paths = mask_paths
         self.loader = LoadImage(image_only=True)
@@ -29,13 +30,23 @@ class BaseDataset(Dataset):
         return len(self.image_paths)
 
     def load_nii(self, path):
+        """
+        Load a NIfTI file.
+        Args:
+            path (str): Path to the NIfTI file.
+        """
         img = self.loader(path)
         img = img.astype(np.float32)
         max_val = np.max(img)
-        img /= max_val if max_val > 0 else 1
         return img
     
     def apply_augmentations(self, image, mask):
+        """
+        Apply augmentations to the image and mask 
+        Args:
+            image (numpy.ndarray): Image to be augmented. Shape: (C, H, W)
+            mask (numpy.ndarray): Mask to be augmented. Shape: (C, H, W)
+        """
         image = np.transpose(image, (1, 2, 0))  # (H, W, C)
         mask = np.transpose(mask, (1, 2, 0)) 
         if self.augmentation:
@@ -45,10 +56,20 @@ class BaseDataset(Dataset):
     
 
 class MedImgDataset3D(BaseDataset):
+    """
+    3D Dataset for full volume inference or training.
+    Args:
+        image_paths (list): List of paths to the images.
+        mask_paths (list): List of paths to the masks.
+        augmentation (callable, optional): Optional augmentation function to be applied on the images and masks.
+    """
     def __init__(self, image_paths, mask_paths, augmentation=None):
         super().__init__(image_paths, mask_paths, augmentation)
 
     def __getitem__(self, idx):
+        """
+        Returns a full 3D image volume and its mask.
+        """
         img = self.load_nii(self.image_paths[idx])
         mask = self.load_nii(self.mask_paths[idx])
         img = torch.tensor(img).float()
@@ -64,15 +85,19 @@ class MedImgDataset3D(BaseDataset):
 
 
 class MedImgDataset2D(BaseDataset):
-    def __init__(self, image_paths, mask_paths, augmentation = None, slice_axis=2, slice_idx=10, get_all_slices=False, num_slices = 50,
-                 keep_background_fraction=0.05, test = False):
+    """
+    2D Slice Dataset for training or evaluation.
+    Args:
+        image_paths (list): List of paths to the images.
+        mask_paths (list): List of paths to the masks.
+        augmentation (callable, optional): Optional augmentation function to be applied on the images and masks.
+        slice_axis (int): Axis along which to slice the 3D volume. Default is 2 (slicing along depth).
+        keep_background_fraction (float): Fraction of background slices to keep. Default is 0.05.
+    """
+    def __init__(self, image_paths, mask_paths, augmentation = None, slice_axis=2, keep_background_fraction=0.05, test = False):
         super().__init__(image_paths, mask_paths)
         self.slice_axis = slice_axis
-        self.slice_idx = slice_idx
         self.augmentation = augmentation
-
-        self.get_all_slices = get_all_slices
-        self.num_slices = num_slices
 
         self.keep_background_fraction = keep_background_fraction
         self.valid_indices = []
@@ -87,10 +112,31 @@ class MedImgDataset2D(BaseDataset):
         self.test = test
 
 
+    def __len__(self):
+        return len(self.valid_indices)
+
+    def __getitem__(self, idx):
+        """
+        Returns a single slice (and optionally its index).
+        Idx is used when reconstructing the full volume while testing.
+        """
+        if self.augmentation is not None:
+            img_slice, mask_slice = self.apply_augmentations(self.img_slice[idx], self.mask_slice[idx])
+
+            # Fix mask shape if necessary
+            if mask_slice.ndim == 3 and mask_slice.shape[-1] == 1:
+                mask_slice = np.transpose(mask_slice, (2, 0, 1))
+        if self.test:
+            return img_slice, mask_slice, idx
+        else:
+            return img_slice, mask_slice
+
+    
 
     def prepare_valid_indices(self):
         """
-        Precompute which slices to keep based on presence of cancer.
+        Precompute and store (volume_idx, slice_idx) tuples to include in dataset.
+        Always include slices with cancer; include some background-only slices randomly.
         """
         print("Preparing dataset slices...")
         for vol_idx in range(len(self.image_paths)):
@@ -109,28 +155,14 @@ class MedImgDataset2D(BaseDataset):
         
         print(f"Total kept slices: {len(self.valid_indices)}")
     
-    def __len__(self):
-        return len(self.valid_indices)
-
-    def __getitem__(self, idx):
-        # print(f"This is happening")
-
-        # img = self.load_nii(self.image_paths[vol_idx])
-        # mask = self.load_nii(self.mask_paths[vol_idx])
-
-
-        if self.augmentation is not None:
-            img_slice, mask_slice = self.apply_augmentations(self.img_slice[idx], self.mask_slice[idx])
-
-            # Fix mask shape if necessary
-            if mask_slice.ndim == 3 and mask_slice.shape[-1] == 1:
-                mask_slice = np.transpose(mask_slice, (2, 0, 1))
-        if self.test:
-            return img_slice, mask_slice, idx
-        else:
-            return img_slice, mask_slice
-
     def get_slice(self, volume, slice_idx):
+        """
+        Extracts a 2D slice from a 3D volume along the specified axis.
+        Args:
+            volume (numpy.ndarray): 3D volume from which to extract the slice.
+            slice_idx (int): Index of the slice to extract.
+        Returns shape: (C=1, H, W)
+        """
         slice_2d = np.take(volume, slice_idx, axis=self.slice_axis)
         slice_2d = np.expand_dims(slice_2d, axis=0)  # (C=1, H, W)
         return slice_2d

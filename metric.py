@@ -14,6 +14,7 @@ def dice_coefficient(loader, model, loss_fn = None, num_classes=3, device="cuda"
     Args:
         loader      : DataLoader yielding (imgs, masks), where masks have values in {0..num_classes-1}
         model       : Model outputting logits of shape (B, num_classes, H, W)
+        loss_fn     : Optional loss function to compute loss
         num_classes : Number of segmentation classes
         device      : 'cuda' or 'cpu'
     """
@@ -24,6 +25,7 @@ def dice_coefficient(loader, model, loss_fn = None, num_classes=3, device="cuda"
     eps = 1e-6
     total_intersection = torch.zeros(num_classes, device=device)
     total_cardinality = torch.zeros(num_classes, device=device)
+
     with torch.no_grad():
         for imgs, masks in loader:
             imgs = imgs.to(device)
@@ -68,10 +70,11 @@ def dice_coefficient(loader, model, loss_fn = None, num_classes=3, device="cuda"
     return avg_dice, avg_loss, dice_per_class_avg
 
 class DiceLoss(nn.Module):
-    def __init__(self, num_classes, smooth=1e-6):
+    def __init__(self, num_classes, weights, smooth=1e-6):
         super(DiceLoss, self).__init__()
         self.num_classes = num_classes
         self.smooth = smooth
+        self.weights = weights
 
     def forward(self, logits, targets):
         # logits: [B, C, H, W], targets: [B, H, W]
@@ -80,8 +83,8 @@ class DiceLoss(nn.Module):
 
         # One-hot encode targets to shape (B, C, H, W)
         targets_one_hot = F.one_hot(targets, num_classes=C).permute(0, 3, 1, 2).float()
-
-        # Apply softmax
+        
+        # Apply softmax to logits
         probs = F.softmax(logits, dim=1).clamp(min=1e-6, max=1 - 1e-6)
 
         if probs.shape != targets_one_hot.shape:
@@ -96,7 +99,7 @@ class DiceLoss(nn.Module):
         union = probs_flat.sum(dim=2) + targets_flat.sum(dim=2)
         dice = (2 * intersection + self.smooth) / (union + self.smooth)
         
-        class_weights = torch.tensor([0.05, 0.475, 0.475], device=dice.device)
+        class_weights = self.weights
         dice = (1 - dice) * class_weights
         selected = class_weights > 0
         loss = dice[:, selected].mean()
@@ -125,17 +128,16 @@ class FocalLoss(nn.Module):
             return focal_loss
 
 class CombinedLoss(nn.Module):
-    def __init__(self, num_classes, dice_weight=0.5, ce_weight=0.5):
+    def __init__(self, num_classes, weights, dice_weight=0.5, ce_weight=0.5):
         super().__init__()
         self.dice = DiceLoss(num_classes)
-        self.weights = torch.tensor([0.05, 0.475, 0.475], device='cuda')
-        # self.ce = nn.CrossEntropyLoss(weight = self.weights)
+        self.weights = weights
         self.ce = FocalLoss(alpha=1, gamma=2, reduction="mean")
         self.dice_weight = dice_weight
         self.ce_weight = ce_weight
 
     def forward(self, logits, targets):
-        dice_loss = self.dice(logits, targets)
+        dice_loss = self.dice(logits, targets, weights=self.weights)
         ce_loss = self.ce(logits, targets)
         return self.dice_weight * dice_loss + self.ce_weight * ce_loss
 
