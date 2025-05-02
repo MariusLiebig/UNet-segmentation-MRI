@@ -154,6 +154,7 @@ class MedImgDataset2D(BaseDataset):
                         self.valid_indices.append((vol_idx, slice_idx))
         
         print(f"Total kept slices: {len(self.valid_indices)}")
+        print(f"Based on background fraction: {self.keep_background_fraction}")
     
     def get_slice(self, volume, slice_idx):
         """
@@ -171,27 +172,4 @@ class MedImgDataset2D(BaseDataset):
 
 if __name__ == "__main__":
     base_path = "/home/mariusliebig/Documents/DYP/HNTS-MRG"
-    img_path = [
-                "HNTSMRG24_train/10/midRT/10_midRT_T2.nii.gz", 
-                "HNTSMRG24_train/8/midRT/8_midRT_T2.nii.gz",
-                "HNTSMRG24_train/6/midRT/6_midRT_T2.nii.gz",
-                "HNTSMRG24_train/4/midRT/4_midRT_T2.nii.gz",
-                "HNTSMRG24_train/2/midRT/2_midRT_T2.nii.gz"
-                ]
-    m_path = [
-            "HNTSMRG24_train/10/midRT/10_midRT_mask.nii.gz", 
-            "HNTSMRG24_train/8/midRT/8_midRT_mask.nii.gz",
-            "HNTSMRG24_train/6/midRT/6_midRT_mask.nii.gz",
-            "HNTSMRG24_train/4/midRT/4_midRT_mask.nii.gz",
-            "HNTSMRG24_train/2/midRT/2_midRT_mask.nii.gz"
-            ]
-    image_paths = [os.path.join(base_path, path) for path in img_path ]
-    mask_paths = [os.path.join(base_path, path) for path in m_path]
-
-    dataset = MedImgDataset2D(image_paths, mask_paths)
-
-
-    for X, y in dataset:
-        print(f"  Image shape: {X.shape}")
-        print(f"  Mask shape: {y.shape}")
-        # show_image(X)
+    

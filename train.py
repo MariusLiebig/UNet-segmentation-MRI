@@ -26,7 +26,7 @@ from metric import (
 
 class Trainer:
 
-    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, keep_background_fraction, early_stop_count = 3):
+    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, keep_background_fraction, early_stop_count = 3, checkpoint_path=None): 
         """
             Initialize our trainer class.
         """
@@ -50,6 +50,7 @@ class Trainer:
         self.best_loss = float("inf")
         self.num_steps_per_val = len(self.dataloader_train) // 10
         self.global_step = 0
+
         self.start_time = time.time()
 
         self.early_stop_count = early_stop_count 
@@ -72,6 +73,10 @@ class Trainer:
         self.max_saved_checkpoints = 1
         self.best_val_loss = float("inf")
         self.keep_background_fraction = keep_background_fraction
+
+        if checkpoint_path is not None:
+            self.load_checkpoint(checkpoint_path, learning_rate=learning_rate)
+            print(f"Checkpoint loaded from {checkpoint_path}")
 
     def train_batch(self):
         """
@@ -116,7 +121,8 @@ class Trainer:
 
     
     def train(self):
-        
+        self.save_training_history()
+
         for epoch in range(self.epochs):
             print(f"Epoch {epoch + 1}/{self.epochs}") #Epoch plus 1 because of 0 indexing
             intermidiate_time = time.time()
@@ -179,9 +185,6 @@ class Trainer:
         # Create checkpoints directory if it doesn't exist
         os.makedirs("checkpoints", exist_ok=True)
 
-        # Save only if current validation accuracy is the best so far
-
-
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
 
@@ -200,7 +203,6 @@ class Trainer:
             torch.save(save_dict, save_path)
             print(f"Best checkpoint saved at epoch {epoch} with val_acc={val_loss:.4f}.")
 
-            # Optional: remove previous best checkpoint if stored
             if hasattr(self, "last_best_checkpoint") and os.path.exists(self.last_best_checkpoint):
                 os.remove(self.last_best_checkpoint)
                 print(f"Removed previous checkpoint: {self.last_best_checkpoint}")
@@ -228,7 +230,7 @@ class Trainer:
 
         self.validation_history = checkpoint.get('validation_history', {})
         self.train_history = checkpoint.get('train_history', {})
-        self.global_step = checkpoint.get('epoch', 0)
+        self.global_step = checkpoint.get('epoch', 4)
 
         self.best_val_loss = float("inf")
 

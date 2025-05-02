@@ -130,14 +130,14 @@ class FocalLoss(nn.Module):
 class CombinedLoss(nn.Module):
     def __init__(self, num_classes, weights, dice_weight=0.5, ce_weight=0.5):
         super().__init__()
-        self.dice = DiceLoss(num_classes)
+        self.dice = DiceLoss(num_classes, weights)
         self.weights = weights
         self.ce = FocalLoss(alpha=1, gamma=2, reduction="mean")
         self.dice_weight = dice_weight
         self.ce_weight = ce_weight
 
     def forward(self, logits, targets):
-        dice_loss = self.dice(logits, targets, weights=self.weights)
+        dice_loss = self.dice(logits, targets)
         ce_loss = self.ce(logits, targets)
         return self.dice_weight * dice_loss + self.ce_weight * ce_loss
 

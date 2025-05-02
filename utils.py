@@ -49,20 +49,6 @@ def data_loader2D(image_paths, mask_paths, train_augmentation, val_augmentation,
 
     return train_loader, val_loader
 
-def data_loader3D(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8):
-    full_dataset = MedImgDataset3D(image_paths, mask_paths, augmentation=augmentation)
-    print(f"Full dataset length: {len(full_dataset)}")
-
-    train_size = int(train_set_size * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-
-    # Randomly split dataset
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
-
-    # Dataloaders, train_loader -> shuffle = true, val_loader -> shuffle = false
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
-    return train_loader, val_loader
 
 def data_loader2D_test(image_paths, mask_paths, augmentation, batch_size, train_set_size = 0.8, keep_background_fraction = 0.1, test = False):
     #Split into train and validation set via pathdir

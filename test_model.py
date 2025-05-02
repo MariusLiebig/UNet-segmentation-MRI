@@ -34,9 +34,7 @@ def predict_and_save_all_slices(model, image_paths, mask_paths, save_path, devic
     augmentation = A.Compose(
         [
             A.Resize(height=image_height, width=image_width),
-            # A.Rotate(limit=35, p=1.0),
-            # A.HorizontalFlip(p=0.5),
-            # A.VerticalFlip(p=0.1),
+
             A.Normalize(
                 mean=[ 0.0],
                 std=[1.0],
@@ -45,10 +43,6 @@ def predict_and_save_all_slices(model, image_paths, mask_paths, save_path, devic
             A.Lambda(mask=mask_to_class),  
             ToTensorV2(),
         ])
-
-
-
-
 
     data, _ = data_loader2D(image_paths, mask_paths, augmentation, 1, 1, keep_background_fraction = 1.0)
     dice, _, _ = dice_coefficient(data, model)
@@ -153,7 +147,7 @@ def load_test_paths():
     return image_paths, mask_paths
 
 if __name__ == "__main__":
-    checkpoint_path = "checkpoints_working/checkpoint_epoch_2.pth"
+    checkpoint_path = "checkpoints/best_checkpoint_0.5_13.pth"
     image_paths, mask_paths = load_test_paths()
     print(image_paths[0])
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-FRACTIONS=(0.1 0.2 0.3 0.5 0.8 1.0)
+FRACTIONS=( 0.1 0.2 0.3 0.5 0.8 1.0)
 
 for frac in "${FRACTIONS[@]}"
 do
