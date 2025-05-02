@@ -6,6 +6,9 @@ __pycache__/
 *.pth
 checkpoints/
 
+saved_images/
+.png
+
 # Ignore Nifti files (medical images)
 *.nii
 *.nii.gz

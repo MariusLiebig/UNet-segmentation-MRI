@@ -9,24 +9,24 @@ import os
 import json
 import gc
 from tqdm import tqdm
-import nibabel as nib
-import numpy as np
-import torch.nn.functional as F
-
-
+import heapq
+import os
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from utils import(
     to_cuda,
     save_checkpoint,
     save_predictions_as_img,
+    save_predictions_as_img_3d
 )
 from metric import (
     dice_coefficient,
     )
 
+
 class Trainer:
 
-    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 5):
+    def __init__(self, batch_size, learning_rate ,epochs, model, dataloaders, loss_fn, optimizer,scaler, early_stop_count = 3):
         """
             Initialize our trainer class.
         """
@@ -35,11 +35,17 @@ class Trainer:
         self.epochs = epochs    
         self.loss_fn = loss_fn
         self.model = model
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=3)
         self.model = to_cuda(self.model)
         self.optimizer = optimizer
         self.dataloader_train, self.dataloader_val = dataloaders
         self.scaler = scaler
+        self.scheduler = ReduceLROnPlateau(
+            optimizer=self.optimizer,
+            mode='min',               # minimize val_loss
+            factor=0.5,               # reduce LR by half
+            patience=3,               # wait for 3 epochs with no improvement
+            verbose=True              # print when LR is reduced
+        )
 
         self.best_loss = float("inf")
         self.num_steps_per_val = len(self.dataloader_train) // 10
@@ -47,150 +53,159 @@ class Trainer:
         self.start_time = time.time()
 
         self.early_stop_count = early_stop_count 
+        self.patience_counter = 0
 
         self.validation_history = dict(
             loss=collections.OrderedDict(),
             accuracy=collections.OrderedDict(),
-            loss_per_step=collections.OrderedDict(),
+            dice_per_class=collections.OrderedDict()
+
         )
 
         self.train_history = dict(
             loss=collections.OrderedDict(),
-            accuracy=collections.OrderedDict()
+            accuracy=collections.OrderedDict(),
         )
 
-        self.best_val_loss = float('inf')
-        self.epochs_since_improvement = 0
+        self.best_checkpoints = []  # list of tuples: (val_accuracy, checkpoint_path)
+        self.max_saved_checkpoints = 1
 
     def train_batch(self):
         """
-        Train the model for one epoch.
+            Train the model for one epoch.
         """
-        self.model.train()
         loop = tqdm(self.dataloader_train, leave=True)
         running_loss = 0
-        running_correct = 0
-        running_total = 0
-        running_dice = 0
-
         num_batches = 0
-
         for img_batch, mask_batch in loop:
-            img_batch, mask_batch = to_cuda(img_batch), to_cuda(mask_batch)
+            img_batch, mask_batch= to_cuda(img_batch), to_cuda(mask_batch)
+            #predictions = self.model(img_batch)
+            #loss = self.loss_fn(predictions, mask_batch)
+            #loss.backward()
+            #self.optimizer.step()
 
-            # Comes when cropping around the tumor
-            if img_batch.ndim == 6:                       # [B, N, C, H, W, D]
-                B, N, C, H, W, D = img_batch.shape
-                img_batch = img_batch.view(B * N, C, H, W, D)
-                # mask_batch was [B, N, H, W, D] or [B, N, 1, H, W, D] depending on your code
-                # make sure it's [B, N, H, W, D] here:
-                mask_batch = mask_batch.squeeze(2) if mask_batch.ndim == 6 else mask_batch
-                mask_batch = mask_batch.view(B * N, H, W, D)
-
-            with autocast(device_type='cuda'):
+            # Faster training on GPU
+            with autocast(device_type='cuda'): #Reduces floating point precision to 16 bits when its ok
                 predictions = self.model(img_batch)
-
-                if mask_batch.ndim == 4 and mask_batch.shape[1] == 1:#For 2D
+                if mask_batch.ndim == 4 and mask_batch.shape[1] == 1:
                     mask_batch = mask_batch.squeeze(1)
-
-                if mask_batch.ndim == 5 and mask_batch.shape[1] == 1: #For 3D
-                    mask_batch = mask_batch.squeeze(1)
-                    
                 mask_batch = mask_batch.long()
 
                 loss = self.loss_fn(predictions, mask_batch)
 
- 
-
-            self.optimizer.zero_grad(set_to_none=True)
+            self.optimizer.zero_grad(set_to_none=True) #set_to_none=True can save a bit of memory
             self.scaler.scale(loss).backward()
+            # Clip gradients
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
-
+            running_loss += loss.detach()
             num_batches += 1
-            running_loss += loss.item()
-
-#------------------------------- Dice accuracy -----------------------------------
-            dice_batch, _ = dice_coefficient([(img_batch, mask_batch)], self.model, num_classes=predictions.shape[1], device=img_batch.device)
-            running_dice += dice_batch
-#--------------------------------------------------------------------------------
-
             loop.set_postfix(loss=loss.item())
 
-        avg_loss = running_loss / num_batches
-        avg_dice = running_dice / num_batches
-
-        return avg_loss, avg_dice
 
 
+        avg_loss = running_loss.sum().item() / num_batches
+        return avg_loss
+
+            #Adding learning rate scheduler?
 
     
     def train(self):
-        os.makedirs("checkpoints", exist_ok=True)
-        os.makedirs("saved_nifti", exist_ok=True)
+        
         for epoch in range(self.epochs):
-            self.global_step += 1
             print(f"Epoch {epoch + 1}/{self.epochs}") #Epoch plus 1 because of 0 indexing
-
-            avg_loss, avg_accuracy = self.train_batch()
-            print(f"Train accuracy: {avg_accuracy:.4f}")
-            print(f"Train loss: {avg_loss:.4f}")
-            self.train_history["accuracy"][self.global_step] = avg_accuracy
-            self.train_history["loss"][self.global_step] = avg_loss
-
-            val_acc, val_loss = dice_coefficient(self.dataloader_val, self.model, num_classes=3, loss_fn=None)
-            print(f"Validation accuracy: {val_acc:.4f}")
-            # print(f"Validation loss: {val_loss:.4f}")
-            # self.validation_history["loss"][self.global_step] = val_loss
-            self.validation_history["accuracy"][self.global_step] = val_acc
-
-            self.scheduler.step(val_acc)
+            intermidiate_time = time.time()
+            avg_loss = self.train_batch()
+            self.scheduler.step(avg_loss) #ReduceLROnPlateau
             lr = self.optimizer.param_groups[0]['lr']
             print(f" LR reduced?  new lr = {lr:.2e}")
 
-            if (epoch + 1) % 10 == 0:
-                self.save_checkpoint(epoch + 1)
-            
-                self.save_training_history()
+            print(f"Train loss: {avg_loss:.4f}")
+            self.train_history["loss"][epoch] = avg_loss
+            avg_dice, avg_loss, dice_per_class = dice_coefficient(self.dataloader_val, self.model, loss_fn=self.loss_fn)
+            print(f"Validation loss: {avg_loss:.4f}")
+            print(f"Validation accuracy: {avg_dice:.4f}")
+            print(f"Dice per class: {dice_per_class}")
+            self.validation_history["loss"][epoch] = avg_loss
+            self.validation_history["accuracy"][epoch] = avg_dice
+            self.validation_history["dice_per_class"][epoch] = dice_per_class
+
+            save_predictions_as_img(self.dataloader_train, self.model, epoch, folder="saved_images/")
+            self.save_checkpoint(epoch, avg_dice)
+
+
+            if self.early_stop():
+                break
+        self.save_training_history()
+        
+    #Putting in UTILS?
 
     
-    def early_stop(self, current_val_loss):
+    def early_stop(self):
         """
-        Early stopping: checks if validation loss improves, otherwise stops after patience epochs.
+        Check if validation loss has not improved in the last `early_stop_count` epochs.
         """
-        if current_val_loss < self.best_val_loss:
-            self.best_val_loss = current_val_loss
-            self.epochs_since_improvement = 0
-            print(f"Validation loss improved to {current_val_loss:.6f}")
+        val_loss = self.validation_history["loss"]
+        
+        # Not enough epochs to consider early stopping
+        if len(val_loss) < self.early_stop_count + 1:
             return False
+
+        # Get the last N + 1 losses
+        relevant_losses = list(val_loss.values())[-(self.early_stop_count + 1):]
+        print(f"Relevant losses for early stopping: {relevant_losses}")
+        best_loss = min(relevant_losses[:-1])  # best before last
+
+        #Give it three epochs to improve
+        if relevant_losses[-1] >= best_loss:
+            self.patience_counter += 1
         else:
-            self.epochs_since_improvement += 1
-            print(f"No improvement for {self.epochs_since_improvement}/{self.early_stop_count} epochs.")
+            self.patience_counter = 0
+        print(f"Patience counter: {self.patience_counter}/{self.early_stop_count}")
 
-            if self.epochs_since_improvement >= self.early_stop_count:
-                print(f"Early stopping triggered. Best validation loss: {self.best_val_loss:.6f}")
-                return True
-
-            return False
-
+        if self.patience_counter > self.early_stop_count:
+            print("Early stopping triggered.")
+            return True
+        return False
 
 
+    def save_checkpoint(self, epoch, val_accuracy):
+        # Create checkpoints directory if it doesn't exist
+        os.makedirs("checkpoints", exist_ok=True)
 
-    def save_checkpoint(self, epoch):
-        save_dict = {
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'scaler_state_dict': self.scaler.state_dict(),
-            'train_history': self.train_history,
-            'validation_history': self.validation_history,
-            'time': time.time() - self.start_time,
-        }
-        torch.save(save_dict, f"checkpoints/checkpoint_epoch_{epoch}.pth")
-        print(f"Checkpoint saved at epoch {epoch}.")
+        # Save only if current validation accuracy is the best so far
+        if not hasattr(self, "best_val_accuracy"):
+            self.best_val_accuracy = -float("inf")
+
+        if val_accuracy > self.best_val_accuracy:
+            self.best_val_accuracy = val_accuracy
+
+            save_path = f"checkpoints/best_checkpoint_{epoch}.pth"
+            save_dict = {
+                'epoch': epoch,
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'scaler_state_dict': self.scaler.state_dict(),
+                'train_history': self.train_history,
+                'validation_history': self.validation_history,
+                'time': time.time() - self.start_time,
+                'val_accuracy': val_accuracy
+            }
+
+            torch.save(save_dict, save_path)
+            print(f"✅ Best checkpoint saved at epoch {epoch} with val_acc={val_accuracy:.4f}.")
+
+            # Optional: remove previous best checkpoint if stored
+            if hasattr(self, "last_best_checkpoint") and os.path.exists(self.last_best_checkpoint):
+                os.remove(self.last_best_checkpoint)
+                print(f"🗑️  Removed previous checkpoint: {self.last_best_checkpoint}")
+
+            self.last_best_checkpoint = save_path
+
+
+
 
 
     def save_training_history(self):
@@ -200,41 +215,19 @@ class Trainer:
         with open("checkpoints/validation_history.json", "w") as f:
             json.dump(self.validation_history, f)
         print("Training and validation history saved.")
+        
 
-    def save_predictions_as_nifti(self, loader, folder="saved_nifti/", max_examples=30):
-        os.makedirs(folder, exist_ok=True)
-        self.model.eval()
-        saved = 0
-        with torch.no_grad():
-            for x, y in loader:
-                x = to_cuda(x)
-                logits = self.model(x)
-                preds = torch.softmax(logits, dim=1)
-                preds = preds.argmax(dim=1)  # [B, H, W]
+    def load_checkpoint(self, path, learning_rate=None):
+        checkpoint = torch.load(path, map_location="cuda")
 
-                # Move everything to CPU
-                preds = preds.cpu().numpy()
-                y = y.cpu().numpy()
-                x = x.cpu().numpy()
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-                for i in range(preds.shape[0]):
-                    if saved >= max_examples:
-                        return
+        self.validation_history = checkpoint.get('validation_history', {})
+        self.train_history = checkpoint.get('train_history', {})
+        self.global_step = checkpoint.get('epoch', 0)
 
-                    # Save prediction
-                    pred_img = nib.Nifti1Image(preds[i].astype(np.uint8), affine=np.eye(4))
-                    nib.save(pred_img, f"{folder}/pred_{saved}.nii.gz")
+        if learning_rate is not None:
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = learning_rate
 
-                    # Save ground truth
-                    gt_img = nib.Nifti1Image(y[i].astype(np.uint8), affine=np.eye(4))
-                    nib.save(gt_img, f"{folder}/gt_{saved}.nii.gz")
-
-                    # Save original input image
-                    img = x[i]
-                    if img.ndim == 3 and img.shape[0] == 1:
-                        img = img[0]  # (H, W) — remove channel dim if grayscale
-
-                    img = nib.Nifti1Image(img.astype(np.float32), affine=np.eye(4))
-                    nib.save(img, f"{folder}/img_{saved}.nii.gz")
-
-                    saved += 1

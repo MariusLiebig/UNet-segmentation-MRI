@@ -1,6 +1,0 @@
-Using Python at: /cluster/home/mariulie/.conda/envs/miniProj/bin/python
-Python 3.12.9
-Using 3 GPUs!
-mumber of GPUs: 3
--------------------- Loading Data --------------------
-Full dataset length: 0
