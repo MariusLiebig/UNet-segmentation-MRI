@@ -1,5 +1,0 @@
-Readme from this repo:
-https://github.com/openmedlab/Awesome-Medical-Dataset/blob/main/resources/HNTS-MRG_2.md
-
-Used as a starting point
-https://github.com/aladdinpersson/Machine-Learning-Collection/tree/master/ML/Pytorch/image_segmentation/semantic_segmentation_unet
