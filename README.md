@@ -33,7 +33,7 @@ pip install -r requirements.txt
 Below are example results from training and validation on the HNTS-MRG dataset using a U-Net:
 
 ### 3D reconstruction
-▶ [Watch 3D rendering video](docs/3d_render.mp4)
+▶ [Watch 3D rendering video](docs/0927.mp4)
 
 ### Training and validation curves
 Loss and accuracy during training:  
@@ -42,5 +42,6 @@ Loss and accuracy during training:
 **Summary**
 - Validation Dice score: ~0.82 (baseline U-Net)  
 - Inference time: ~1–2 seconds per 3D volume (RTX 3080)  
+
 
 
