@@ -27,7 +27,7 @@ cd UNet-segmentation-MRI
 # create environment
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
+```
 ## Results
 
 Below are example results from training and validation on the HNTS-MRG dataset using a U-Net:
@@ -42,4 +42,5 @@ Loss and accuracy during training:
 **Summary**
 - Validation Dice score: ~0.82 (baseline U-Net)  
 - Inference time: ~1–2 seconds per 3D volume (RTX 3080)  
+
 
