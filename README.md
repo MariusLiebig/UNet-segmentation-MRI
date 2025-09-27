@@ -40,7 +40,7 @@ Input MRI slice with ground-truth segmentation (Blue and Yellow) vs. model predi
 ### 3D reconstruction
 Input MRI slice with ground-truth segmentation (Blue and Yellow) vs. model prediction (Red and Blue):  
 ![MRI segmentation example](docs/gt_3D.png)
-![MRI segmentation prediction](docs/pred_gt_4d.png) 
+![MRI segmentation prediction](docs/pred_gt_3d.png) 
 
 Video of 3D reconstruction
 ![3D prediction](docs/example_3d.png)  
@@ -53,6 +53,7 @@ Loss and accuracy during training:
 **Summary**
 - Validation Dice score: ~0.82 (baseline U-Net)  
 - Inference time: ~1–2 seconds per 3D volume (RTX 3080)  
+
 
 
 
