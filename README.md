@@ -18,15 +18,19 @@ It demonstrates how deep learning can be applied to medical image segmentation, 
 
 ## Getting Started
 
-### 1. Installation
+## Installation
+
+⚠️ **Note:** This project is intended to run on a **Linux server with a CUDA-enabled GPU**.  
+Windows and macOS are not officially supported due to dependencies on CUDA and medical imaging libraries.
 ```bash
-# clone repository
+### 1. Clone the repository
+```bash
 git clone https://github.com/MariusLiebig/UNet-segmentation-MRI.git
 cd UNet-segmentation-MRI
 
 # create environment
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+conda env create -f environment.yaml
+conda activate miniProj
 ```
 ## Results
 
@@ -53,6 +57,7 @@ Loss and accuracy during training:
 **Summary**
 - Validation Dice score: ~0.82 (baseline U-Net)  
 - Inference time: ~1–2 seconds per 3D volume (RTX 3080)  
+
 
 
 
