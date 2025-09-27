@@ -32,7 +32,18 @@ pip install -r requirements.txt
 
 Below are example results from training and validation on the HNTS-MRG dataset using a U-Net:
 
+### Example segmentation
+Input MRI slice with ground-truth segmentation (Blue and Yellow) vs. model prediction (Red and Blue):  
+![MRI segmentation example](docs/gt.png)
+![MRI segmentation prediction](docs/pred_gt.png)
+
 ### 3D reconstruction
+Input MRI slice with ground-truth segmentation (Blue and Yellow) vs. model prediction (Red and Blue):  
+![MRI segmentation example](docs/gt_3D.png)
+![MRI segmentation prediction](docs/pred_gt_4d.png) 
+
+Video of 3D reconstruction
+![3D prediction](docs/example_3d.png)  
 ▶ [Watch 3D rendering video](docs/0927.mp4)
 
 ### Training and validation curves
@@ -42,6 +53,7 @@ Loss and accuracy during training:
 **Summary**
 - Validation Dice score: ~0.82 (baseline U-Net)  
 - Inference time: ~1–2 seconds per 3D volume (RTX 3080)  
+
 
 
 
